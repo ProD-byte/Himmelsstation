@@ -2,6 +2,7 @@
 #include "ort.h"
 #include "einstellungen.h"
 #include "netzupdate.h"
+#include "satelliten.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -185,6 +186,12 @@ static void aufgabe(void *) {
       naechsteNacht = millis() + 10 * 60 * 1000;
     }
 
+    // Satelliten-Ueberfluege (Bahndaten taeglich, gerechnet wird nur bei Bedarf)
+    if (aktuell.gueltig) {
+      Ort o = ortAktuell();
+      satellitenAktualisieren(o.lat, o.lon);
+    }
+
     // Neue Firmware auf GitHub? (erst wenn alles laeuft, dann alle 6 Stunden oder auf Wunsch)
     if (aktuell.gueltig && ((int32_t)(millis() - naechstesUpdate) >= 0 || updateSucheGewuenscht())) {
       updatePruefen();
@@ -197,7 +204,7 @@ static void aufgabe(void *) {
 void himmelStart() {
   sperre = xSemaphoreCreateMutex();
   // Kern 0, damit Kern 1 ungestoert zeichnen kann
-  xTaskCreatePinnedToCore(aufgabe, "himmel", 12288, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(aufgabe, "himmel", 20480, nullptr, 1, nullptr, 0);
 }
 
 bool himmelHolen(Himmel &h) {

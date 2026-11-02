@@ -13,6 +13,7 @@ Das Geschwister-Projekt zur [Wetterstation](https://github.com/ProD-byte/Wetters
 |---|---|
 | 🌌 **Heute Nacht** | wann es richtig dunkel wird (astronomische Dämmerung), Zeitleiste mit Dämmerungsstufen, Mond am Himmel und Wolken je Stunde, dazu eine Note fürs Beobachten. Sonne und Mond rechnet das Gerät selbst (gegen skyfield geprüft: Sonne auf Sekunden, Mond auf ca. 3 min) |
 | 🪐 **Planeten** | Merkur, Venus, Mars, Jupiter und Saturn: welche heute Nacht zu sehen sind, von wann bis wann, wo sie am höchsten stehen (Höhe, Richtung) und wie hell. Am Südhimmel eingezeichnet. Selbst gerechnet aus den JPL-Bahnelementen, gegen skyfield auf wenige Bogenminuten geprüft |
+| 🛰️ **ISS & Satelliten** | der nächste sichtbare Überflug von ISS, chinesischer Raumstation Tiangong oder Hubble: Bahn am Himmel, kleine animierte Station, Uhrzeit, Dauer, Richtung, Höhe, dazu der Überflug danach. Die Seite erscheint nur, wenn in den nächsten 20 h einer kommt; 5 min vorher springt die Station dorthin und zeigt live, wohin du schauen musst. Bahndaten täglich von [CelesTrak](https://celestrak.org/), gerechnet mit SGP4 auf dem Gerät |
 | 🌙 **Mond** | Mondphase als Bild, beleuchteter Teil, nächster Voll- und Neumond. Das Gerät rechnet das selbst aus dem Datum aus |
 | ✨ **Nachthimmel** | funkelnde Sterne als Hintergrund, Morgen- und Abendrot um Sonnenauf- und -untergang |
 | 📶 **WLAN** | Einrichtung per Handy (WLAN „Himmelsstation-Setup“), merkt sich bis zu 5 Netze |
@@ -23,7 +24,7 @@ Das Geschwister-Projekt zur [Wetterstation](https://github.com/ProD-byte/Wetters
 
 ## Was als Nächstes kommt (Version 1)
 
-Seeing & Durchsicht · ISS & Satelliten · Weltraumwetter mit Polarlicht-Alarm · Raketenstarts
+Seeing & Durchsicht · Starlink-Ketten · Weltraumwetter mit Polarlicht-Alarm · Raketenstarts
 
 ## Tasten
 
@@ -40,6 +41,7 @@ PlatformIO (VS Code), Umgebung `tdisplay_s3` (USB) oder `tdisplay_s3_wlan` (übe
 |---|---|
 | `src/main.cpp` | Seiten, Tasten, Startbild, Update über WLAN |
 | `src/himmel.cpp` | Hintergrund-Aufgabe: Ort, Zeitzone, Wolken je Stunde, Updates; Mond-Rechnungen |
+| `src/satelliten.cpp` | Bahndaten laden, Überflüge mit SGP4 berechnen |
 | `src/astro.cpp` | Sonne, Mond und Planeten selbst gerechnet: Höhe, Richtung, Auf-/Untergang, Dämmerung, Helligkeit |
 | `src/bilder.cpp` | Himmel, Mondphase, Text mit Umlauten |
 | `src/wlan.cpp`, `src/portal_html.h` | WLAN mit Einrichtung per Handy (inkl. Ortswahl) |
@@ -52,4 +54,4 @@ PlatformIO (VS Code), Umgebung `tdisplay_s3` (USB) oder `tdisplay_s3_wlan` (übe
 ## Lizenz
 
 MIT, siehe [LICENSE](LICENSE). Schrift Lato: SIL Open Font License ([lizenzen/OFL-Lato.txt](lizenzen/OFL-Lato.txt)).
-Daten: [Open-Meteo](https://open-meteo.com/) (CC BY 4.0).
+Daten: [Open-Meteo](https://open-meteo.com/) (CC BY 4.0), Bahndaten: [CelesTrak](https://celestrak.org/).

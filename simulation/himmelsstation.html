@@ -13,7 +13,7 @@
     <canvas id="hsLcd" width="640" height="340"></canvas>
     <div class="tasten"><button id="hsWeiter" title="IO0">IO0</button><button id="hsLicht" title="IO14">IO14</button></div>
   </div>
-  <p class="leise" id="hsText">Für Cottbus, mit echten Wolken von Open-Meteo. Dämmerung, Mond und Planeten rechnet die Himmelsstation selbst aus. Taste IO0 blättert weiter. ISS &amp; Satelliten, Polarlicht und Raketenstarts kommen nach und nach dazu.</p>
+  <p class="leise" id="hsText">Für Cottbus, mit echten Wolken von Open-Meteo. Dämmerung, Mond, Planeten und Satelliten rechnet die Himmelsstation selbst aus. Taste IO0 blättert weiter. Polarlicht und Raketenstarts kommen nach und nach dazu.</p>
 </div>
 <script>
 (() => {
@@ -21,7 +21,7 @@
   const cv = document.getElementById("hsLcd"), c = cv.getContext("2d");
   const W = 320, H = 170, en = /[?&]en\b/.test(location.search);
   const L = (de, e) => en ? e : de;
-  if (en) document.getElementById("hsText").textContent = "For Cottbus, with real clouds from Open-Meteo. The sky station works out twilight, moon and planets by itself. Button IO0 turns the page. ISS & satellites, aurora and rocket launches are coming step by step.";
+  if (en) document.getElementById("hsText").textContent = "For Cottbus, with real clouds from Open-Meteo. The sky station works out twilight, moon, planets and satellites by itself. Button IO0 turns the page. Aurora and rocket launches are coming step by step.";
   const sterne = Array.from({ length: 60 }, (_, i) => [(i * 97.3) % W, (i * 53.9) % H, (i * 0.71) % 6.3, i % 7 === 0 ? 1.2 : 0.7]);
   let seite = 0, alt = 0, wechselStart = -1e9, seiteSeit = 0, licht = 0;
   const t0 = performance.now();
@@ -46,7 +46,8 @@
     text(s, x, y, f, c.font, a);
   }
   // ---------- Heute Nacht (wie astro.cpp und seiteNacht in main.cpp) ----------
-  const LAT = 51.7563, LON = 14.3329, RAD = Math.PI / 180;
+  // Ort: Cottbus, zum Ausprobieren auch ?lat=35.68&lon=139.65&ort=Tokio
+  const Q = new URLSearchParams(location.search), LAT = +(Q.get("lat") || 51.7563), LON = +(Q.get("lon") || 14.3329), ORT = Q.get("ort") || "Cottbus", RAD = Math.PI / 180;
   let abw = 3600, wolkenAb = 0, wolken = [];  // Zeitzone und Wolken je Stunde (live von Open-Meteo, sonst Beispiel)
   const hoeheAus = (ra, dec, d) => Math.asin(Math.sin(LAT * RAD) * Math.sin(dec) + Math.cos(LAT * RAD) * Math.cos(dec) * Math.cos((280.46061837 + 360.98564736629 * d + LON) * RAD - ra)) / RAD;
   function sonneH(t) {
@@ -232,6 +233,96 @@
                 `${PNAME()[i]}  ${uhr(p.ab)} – ${uhr(p.bis)} · ${Math.round(p.hoehe)}° ${richtung(p.az)} · ${mag} mag`), ox + 22, y, W - 30, "#fff", 12, false, "left");
     });
   }
+  // ---------- ISS & Satelliten (wie satelliten.cpp und seiteSatelliten in main.cpp; hier mit satellite.js) ----------
+  const SATS = [["ISS", 25544], ["Tiangong", 48274], ["Hubble", 20580]];
+  let ueberfluege = null;  // null = rechnet noch, [] = keiner
+  function sonneRichtung(t) {  // Einheitsvektor zur Sonne (aequatorial)
+    const d = t / 86400 - 10957.5, g = (357.529 + 0.98560028 * d) * RAD, l = (280.459 + 0.98564736 * d + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * RAD, e = 23.439 * RAD;
+    return [Math.cos(l), Math.cos(e) * Math.sin(l), Math.sin(e) * Math.sin(l)];
+  }
+  function satDaten(rec, t) {
+    const dt = new Date(t * 1000), pv = satellite.propagate(rec, dt);
+    if (!pv.position) return null;
+    const gmst = satellite.gstime(dt), ecf = satellite.eciToEcf(pv.position, gmst);
+    const la = satellite.ecfToLookAngles({ longitude: LON * RAD, latitude: LAT * RAD, height: 0 }, ecf);
+    const r = pv.position, sd = sonneRichtung(t), dot = r.x * sd[0] + r.y * sd[1] + r.z * sd[2];
+    const quer = Math.sqrt(Math.max(0, r.x * r.x + r.y * r.y + r.z * r.z - dot * dot));
+    const angestrahlt = dot > 0 || quer > 6371;  // Erdschatten als Zylinder
+    return { az: la.azimuth / RAD, el: la.elevation / RAD, sicht: angestrahlt && sonneH(t) < -6 && la.elevation > 0 };
+  }
+  async function satellitenRechnen() {
+    if (!window.satellite) await new Promise((ok, fehler) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/satellite.js/5.0.0/satellite.min.js"; sc.onload = ok; sc.onerror = fehler; document.head.appendChild(sc); });
+    const jetzt = Math.floor(Date.now() / 1000), alle = [];
+    for (const [name, nr] of SATS) {
+      const z = (await (await fetch(`https://celestrak.org/NORAD/elements/gp.php?CATNR=${nr}&FORMAT=TLE`)).text()).trim().split("\n");
+      const rec = satellite.twoline2satrec(z[1].trim(), z[2].trim());
+      let lauf = null;
+      for (let t = jetzt - 1200; t < jetzt + 2 * 86400; t += 20) {
+        const o = satDaten(rec, t);
+        if (!o) break;
+        if (o.el > 0) { if (!lauf) lauf = { name, rec, start: t, punkte: [] }; lauf.punkte.push(o); continue; }
+        if (!lauf) continue;
+        lauf.ende = t; const s2 = lauf.punkte.map((q, i) => [q, lauf.start + i * 20]).filter(([q]) => q.sicht);
+        if (s2.length && lauf.ende > jetzt) {
+          const max = Math.max(...s2.map(([q]) => q.el)), ab = s2[0][1], bis = s2[s2.length - 1][1];
+          if (max >= 10 && bis - ab >= 60) {
+            const azAb = s2[0][0].az, azBis = s2[s2.length - 1][0].az, dd = ((azBis - azAb + 540) % 360) - 180;
+            alle.push({ ...lauf, sichtAb: ab, sichtBis: bis, maxHoehe: max, azAb, azBis, azMitte: (azAb + dd / 2 + 360) % 360 });
+          }
+        }
+        lauf = null;
+      }
+    }
+    ueberfluege = alle.sort((a, b) => a.sichtAb - b.sichtAb).slice(0, 4);
+  }
+  satellitenRechnen().catch(() => { ueberfluege = []; });
+  function satZeichnen(nr, x, y) {
+    const r = (f, a, b, w, h) => { c.fillStyle = f; c.fillRect(x + a, y + b, w, h); };
+    if (nr === "ISS") {
+      r("rgb(205,214,228)", -12, 0, 25, 1);
+      for (const sx of [-11, -7, 7, 11]) { r("rgb(217,164,65)", sx - 1, -6, 3, 5); r("rgb(217,164,65)", sx - 1, 2, 3, 5); r("rgb(120,86,30)", sx, -6, 1, 5); r("rgb(120,86,30)", sx, 2, 1, 5); }
+      r("rgb(242,245,250)", -3, -2, 7, 4); r("rgb(154,166,187)", 0, -2, 1, 4);
+    } else if (nr === "Tiangong") {
+      r("rgb(220,226,236)", -6, -1, 13, 3); r("rgb(220,226,236)", -1, -6, 3, 13);
+      for (const sx of [-10, 8]) r("rgb(90,130,210)", sx, -2, 3, 5); for (const sy of [-9, 7]) r("rgb(90,130,210)", -2, sy, 5, 3);
+    } else { r("rgb(220,226,236)", -5, -2, 11, 5); r("rgb(90,130,210)", -2, -8, 4, 5); r("rgb(90,130,210)", -2, 4, 4, 5); }
+  }
+  function seiteSatelliten(ox, t) {
+    text(L(`Satelliten über ${ORT}`, `Satellites over ${ORT}`), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
+    if (!ueberfluege) { passend(L("Rechne Überflüge ...", "Calculating passes ..."), ox + W / 2, H / 2, W - 12, "#d8eaf2", 14, false, "center"); return; }
+    const jetzt = Date.now() / 1000, liste = ueberfluege.filter(u => u.ende > jetzt);
+    if (!liste.length) { passend(L("Kein sichtbarer Überflug in 2 Tagen", "No visible pass in 2 days"), ox + W / 2, H / 2, W - 12, "#d8eaf2", 14, false, "center"); return; }
+    const u = liste[0], s2 = u.sichtAb - jetzt;
+    const wann = s2 >= 3600 ? `in ${Math.floor(s2 / 3600)} h ${Math.floor(s2 % 3600 / 60)} min` : s2 > 0 ? `in ${Math.ceil(s2 / 60)} min` : "";
+    if (wann) text(`${u.name} ${wann}`, ox + 8, 36, "rgb(255,190,90)", "400 12px Lato, sans-serif");
+    else text(L(`${u.name} jetzt am Himmel!`, `${u.name}: look up now!`), ox + 8, 36, `rgba(110,230,130,${0.6 + 0.4 * Math.sin(t * 0.008)})`, "400 12px Lato, sans-serif");
+    if (liste[1]) {
+      const d = new Date((liste[1].sichtAb + abw) * 1000), h = new Date((jetzt + abw) * 1000);
+      const tag = d.getUTCDate() === h.getUTCDate() ? L("heute", "today") : L(["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"], ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])[d.getUTCDay()];
+      text(L(`danach ${liste[1].name} ${tag} ${uhr(liste[1].sichtAb)}`, `then ${liste[1].name} ${tag} ${uhr(liste[1].sichtAb)}`), ox + W - 8, 36, "#d8eaf2", "400 12px Lato, sans-serif", "right");
+    }
+    const hor = 108, hoehe = 64, cx = ox + W / 2, halb = 140, rel = az => ((az - u.azMitte + 540) % 360) - 180;
+    const px = az => cx + Math.max(-100, Math.min(100, rel(az))) / 100 * halb, py = el => hor - Math.sqrt(Math.max(0, el) / 90) * hoehe;
+    c.fillStyle = "rgba(170,180,205,.5)"; c.fillRect(cx - halb - 6, hor, 2 * halb + 12, 1);
+    for (let k = 0; k < 8; k++) if (Math.abs(rel(k * 45)) <= 96) text(richtung(k * 45), px(k * 45), hor + 12, "rgb(150,160,190)", "400 11px Lato, sans-serif", "center");
+    const P = u.punkte;
+    for (let i = 0; i + 1 < P.length; i++) {
+      if (Math.abs(rel(P[i].az)) > 100 || Math.abs(rel(P[i + 1].az)) > 100) continue;
+      if (P[i].sicht && P[i + 1].sicht) { c.strokeStyle = "rgba(255,236,190,.6)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(px(P[i].az), py(P[i].el)); c.lineTo(px(P[i + 1].az), py(P[i + 1].el)); c.stroke(); }
+      else if (i % 2 === 0) { c.fillStyle = "rgba(170,180,205,.5)"; c.fillRect(px(P[i].az), py(P[i].el), 1, 1); }
+    }
+    const i0 = (u.sichtAb - u.start) / 20, i1 = (u.sichtBis - u.start) / 20;
+    const pos = jetzt >= u.start && jetzt <= u.ende ? (jetzt - u.start) / 20 : i0 + (t % 7000) / 7000 * Math.max(1, i1 - i0);
+    const ort = q => { q = Math.max(0, Math.min(P.length - 1.001, q)); const i = Math.floor(q), f = q - i, a = P[i], b = P[i + 1], daz = ((b.az - a.az + 540) % 360) - 180; return [px(a.az + daz * f), py(a.el + (b.el - a.el) * f)]; };
+    for (let k = 14; k >= 1; k--) { const [x, y] = ort(pos - k * 0.06); c.fillStyle = `rgba(255,236,190,${0.67 * (14 - k) / 14})`; c.beginPath(); c.arc(x, y, 2, 0, 7); c.fill(); }
+    const [x, y] = ort(pos); c.fillStyle = "rgba(255,240,200,.18)"; c.beginPath(); c.arc(x, y, 6, 0, 7); c.fill();
+    satZeichnen(u.name, Math.round(x), Math.round(y));
+    const d = new Date((u.sichtAb + abw) * 1000), h = new Date((jetzt + abw) * 1000);
+    const tag = d.getUTCDate() === h.getUTCDate() ? L("Heute", "Today") : d.getUTCDate() === new Date((jetzt + abw + 86400) * 1000).getUTCDate() ? L("Morgen", "Tomorrow") : L(["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"], ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])[d.getUTCDay()];
+    const min = Math.max(1, Math.round((u.sichtBis - u.sichtAb) / 60));
+    passend(L(`${tag} ${uhr(u.sichtAb)} · ${min} min sichtbar`, `${tag} ${uhr(u.sichtAb)} · visible ${min} min`), ox + W / 2, 143, W - 12, "#fff", 14, false, "center");
+    passend(L(`von ${richtung(u.azAb)} nach ${richtung(u.azBis)} · bis ${Math.round(u.maxHoehe)}° hoch`, `from ${richtung(u.azAb)} to ${richtung(u.azBis)} · up to ${Math.round(u.maxHoehe)}°`), ox + W / 2, 158, W - 12, "#d8eaf2", 12, false, "center");
+  }
   // Mondphase: 0 Neumond, 0.5 Vollmond (wie mondphase() in bilder.cpp)
   const phase = () => (((Date.now() / 1000 - 947182440) / 86400 / 29.530588853) % 1 + 1) % 1;
   function mond(cx, cy, r, p) {
@@ -268,8 +359,8 @@
   }
   function seiteDemnaechst(ox, t) {
     text(L("Demnächst", "Coming soon"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
-    const liste = L(["Seeing & Durchsicht", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts", "Meteorströme & Finsternisse"],
-                    ["Seeing & transparency", "ISS & satellites", "Aurora alert", "Rocket launches", "Meteor showers & eclipses"]);
+    const liste = L(["Seeing & Durchsicht", "Starlink-Ketten", "Polarlicht-Alarm", "Raketenstarts", "Meteorströme & Finsternisse"],
+                    ["Seeing & transparency", "Starlink trains", "Aurora alert", "Rocket launches", "Meteor showers & eclipses"]);
     liste.forEach((s, i) => {
       const y = 48 + i * 24, x = ox + 30, an = 0.55 + 0.45 * Math.sin(t * 0.004 + i * 1.3);
       c.strokeStyle = c.fillStyle = `rgba(255,214,120,${an})`; c.lineWidth = 1;
@@ -278,7 +369,7 @@
       passend(s, x + 14, y, W - 50, "#fff", 13, false, "left");
     });
   }
-  const SEITEN = [seiteNacht, seitePlaneten, seiteMond, seiteDemnaechst];
+  const SEITEN = [seiteNacht, seitePlaneten, seiteSatelliten, seiteMond, seiteDemnaechst];
   function statusLeiste() {
     const z = new Date(), uhr = String(z.getHours()).padStart(2, "0") + ":" + String(z.getMinutes()).padStart(2, "0");
     text(uhr, W - 37, 18, "#fff", "700 15px Lato, sans-serif", "right");

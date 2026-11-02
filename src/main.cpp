@@ -2,7 +2,7 @@
 // Standort: am Handy gewaehlt (Einrichtung), sonst grob ueber die Internet-Adresse, sonst Cottbus
 //   Taster GPIO 0:  kurz = naechste Seite, 2 s halten = Sprache Deutsch/Englisch (zeigt auch Adresse + Build)
 //   Taster GPIO 14: kurz = Helligkeit, 3 s halten = WLAN und Ort neu einrichten
-// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Planeten, Mond, Demnaechst - weitere folgen
+// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Planeten, Satelliten, Mond, Demnaechst - weitere folgen
 // Zeitzone, Sonne und Wolken: open-meteo.com
 // WLAN: Einrichtung per Handy ueber das WLAN "Himmelsstation-Setup" (siehe wlan.cpp)
 // Einstellungen: http://himmelsstation.local (siehe web.cpp)
@@ -14,6 +14,7 @@
 #include <ArduinoOTA.h>
 #include <time.h>
 #include "himmel.h"
+#include "satelliten.h"
 #include "bilder.h"
 #include "wlan.h"
 #include "ort.h"
@@ -386,7 +387,178 @@ void seitePlaneten(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 3: Mond (rechnet das Geraet selbst aus dem Datum)
+// Seite 3: ISS & Satelliten - der naechste sichtbare Ueberflug, nur wenn einer in den naechsten 20 h kommt
+// ------------------------------------------------------------
+Ueberflug sat;                 // der naechste (mit Bahn)
+Ueberflug satListe[SAT_LISTE]; // die danach
+bool satDa = false;
+int satWeitere = 0;
+
+// Kleine Satelliten: ISS mit Gitter und je zwei goldenen Solarfluegeln, Tiangong als T mit blauen
+// Fluegeln, Hubble als silberne Roehre mit zwei Fluegeln
+void satZeichnen(int nr, int x, int y) {
+  const uint16_t gold = farbe(217, 164, 65), linie = farbe(120, 86, 30), blau = farbe(90, 130, 210), silber = farbe(220, 226, 236);
+  if (nr == 0) {
+    bild.drawFastHLine(x - 12, y, 25, farbe(205, 214, 228));
+    for (int sx : {-11, -7, 7, 11}) {
+      bild.fillRect(x + sx - 1, y - 6, 3, 5, gold);
+      bild.fillRect(x + sx - 1, y + 2, 3, 5, gold);
+      bild.drawFastVLine(x + sx, y - 6, 5, linie);
+      bild.drawFastVLine(x + sx, y + 2, 5, linie);
+    }
+    bild.fillRect(x - 3, y - 2, 7, 4, farbe(242, 245, 250));
+    bild.drawFastVLine(x, y - 2, 4, farbe(154, 166, 187));
+  } else if (nr == 1) {
+    bild.fillRect(x - 6, y - 1, 13, 3, silber);  // Kernmodul
+    bild.fillRect(x - 1, y - 6, 3, 13, silber);  // Labormodule quer
+    for (int sx : {-10, 8}) bild.fillRect(x + sx, y - 2, 3, 5, blau);
+    for (int sy : {-9, 7}) bild.fillRect(x - 2, y + sy, 5, 3, blau);
+  } else {
+    bild.fillRoundRect(x - 5, y - 2, 11, 5, 2, silber);
+    bild.fillRect(x - 2, y - 8, 4, 5, blau);
+    bild.fillRect(x - 2, y + 4, 4, 5, blau);
+  }
+}
+
+void seiteSatelliten(int ox, uint32_t t) {
+  char z[48];
+  snprintf(z, sizeof(z), TX("Satelliten über %s", "Satellites over %s"), himmel.ort);
+  titel(ox, z, t);
+  const Ueberflug &iss = sat;
+  if (!satDa) {
+    schrift(bild, S_M);
+    schreibe(bild, TX("Kein Überflug in Sicht", "No pass in sight"), ox + B / 2, H / 2, HELL, MITTE);
+    return;
+  }
+  const bool hk = hoch();
+  time_t jetzt = time(nullptr);
+  const bool lauft = jetzt >= iss.start && jetzt <= iss.ende;
+
+  // Countdown unter dem Titel
+  int y0 = hk ? HOCH_TITEL_Y + 18 : 36;
+  schrift(bild, S_K);
+  if (jetzt < iss.sichtAb) {
+    long s = iss.sichtAb - jetzt;
+    if (s >= 3600) snprintf(z, sizeof(z), TX("in %ld h %ld min", "in %ld h %ld min"), s / 3600, s % 3600 / 60);
+    else if (s >= 60) snprintf(z, sizeof(z), TX("in %ld min", "in %ld min"), (s + 59) / 60);
+    else snprintf(z, sizeof(z), TX("in %ld s", "in %ld s"), s);
+    char mit[56];
+    snprintf(mit, sizeof(mit), "%s %s", satName(iss.sat), z);
+    schreibe(bild, mit, ox + 8, y0, farbe(255, 190, 90), LINKS);
+  } else if (jetzt <= iss.sichtBis) {
+    float puls = 0.6f + 0.4f * sinf(t * 0.008f);
+    snprintf(z, sizeof(z), TX("%s jetzt am Himmel!", "%s: look up now!"), satName(iss.sat));
+    schreibe(bild, z, ox + 8, y0,
+             bild.alphaBlend(255 * puls, farbe(110, 230, 130), hintergrund(ox + 40, y0 - 5)), LINKS);
+  }
+
+  // danach: der naechste Ueberflug eines Satelliten (quer rechts)
+  if (!hk && satWeitere) {
+    const Ueberflug &d = satListe[0];
+    struct tm a2, h2;
+    localtime_r(&d.sichtAb, &a2);
+    localtime_r(&jetzt, &h2);
+    static const char *WT_DE[] = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"}, *WT_EN[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const char *tag2 = a2.tm_yday == h2.tm_yday ? TX("heute", "today") : TX(WT_DE[a2.tm_wday], WT_EN[a2.tm_wday]);
+    snprintf(z, sizeof(z), TX("danach %s %s %02d:%02d", "then %s %s %02d:%02d"), satName(d.sat), tag2, a2.tm_hour, a2.tm_min);
+    schrift(bild, S_K);
+    schreibe(bild, z, ox + B - 8, y0, HELL, RECHTS);
+  }
+
+  // Himmel von vorn: Blick in Richtung der Bahnmitte, links/rechts je 100 Grad, oben senkrecht.
+  // Hoehe mit Wurzel, damit auch flache Ueberfluege (in Deutschland oft 10-30 Grad) gut zu sehen sind
+  const int hor = hk ? 196 : 108, hoehe = hk ? 110 : 64;
+  const int cx = ox + B / 2, halb = hk ? 74 : 140;
+  auto px = [&](float az) { return cx + (int)(constrain(fmodf(az - iss.azMitte + 540, 360) - 180, -100.0f, 100.0f) / 100 * halb); };
+  auto py = [&](float el) { return hor - (int)(sqrtf(max(0.0f, el) / 90) * hoehe); };
+
+  const uint16_t grau = bild.alphaBlend(130, farbe(170, 180, 205), hintergrund(cx, hor));
+  bild.drawFastHLine(cx - halb - 6, hor, 2 * halb + 12, grau);
+  schrift(bild, S_K);
+  for (int k = 0; k < 8; k++) {
+    float rel = fmodf(k * 45 - iss.azMitte + 540, 360) - 180;
+    if (fabsf(rel) > 96) continue;
+    schreibe(bild, richtung(k * 45), px(k * 45), hor + 12, farbe(150, 160, 190), MITTE);
+  }
+  // Bahn: gepunktet, der sichtbare Teil hell
+  for (int i = 0; i + 1 < iss.punkte; i++) {
+    const SatPunkt &a = iss.bahn[i], &b = iss.bahn[i + 1];
+    // ausserhalb der Ansicht (mehr als 100 Grad seitlich) nicht zeichnen
+    if (fabsf(fmodf(a.az10 / 10.0f - iss.azMitte + 540, 360) - 180) > 100 ||
+        fabsf(fmodf(b.az10 / 10.0f - iss.azMitte + 540, 360) - 180) > 100)
+      continue;
+    int xa = px(a.az10 / 10.0f), ya = py(a.el10 / 10.0f), xb = px(b.az10 / 10.0f), yb = py(b.el10 / 10.0f);
+    if (a.sichtbar && b.sichtbar) bild.drawWideLine(xa, ya, xb, yb, 1.5f, bild.alphaBlend(150, farbe(255, 236, 190), hintergrund(xa, ya)));
+    else if (i % 2 == 0) bild.drawPixel(xa, ya, grau);
+  }
+
+  if (iss.punkte < 2) return;
+  // Wo steht der Satellit? Waehrend des Ueberflugs echt, sonst fliegt sie den sichtbaren Teil als Vorschau ab
+  float pos;  // Index in bahn[] (mit Nachkommastellen)
+  int i0 = (iss.sichtAb - iss.start) / SAT_SCHRITT, i1 = (iss.sichtBis - iss.start) / SAT_SCHRITT;
+  if (lauft) pos = float(jetzt - iss.start) / SAT_SCHRITT + (t % 1000) / 1000.0f / SAT_SCHRITT;
+  else pos = i0 + (t % 7000) / 7000.0f * max(1, i1 - i0);
+  auto ort = [&](float p, int &x, int &y) {
+    p = constrain(p, 0.0f, iss.punkte - 1.001f);
+    int i = (int)p;
+    float f = p - i;
+    const SatPunkt &a = iss.bahn[i], &b = iss.bahn[i + 1];
+    float daz = fmodf((b.az10 - a.az10) / 10.0f + 540, 360) - 180;
+    x = px(a.az10 / 10.0f + daz * f);
+    y = py((a.el10 + (b.el10 - a.el10) * f) / 10.0f);
+  };
+  for (int k = 14; k >= 1; k--) {  // Leuchtschweif
+    int x, y;
+    ort(pos - k * 0.12f, x, y);
+    bild.fillSmoothCircle(x, y, 2, bild.alphaBlend(170 * (14 - k) / 14, farbe(255, 236, 190), hintergrund(x, y)));
+  }
+  int x, y;
+  ort(pos, x, y);
+  bild.fillSmoothCircle(x, y, 6, bild.alphaBlend(45, farbe(255, 240, 200), hintergrund(x, y)));
+  satZeichnen(iss.sat, x, y);
+
+  // Wann, wie lange, woher
+  struct tm a, h;
+  localtime_r(&iss.sichtAb, &a);
+  localtime_r(&jetzt, &h);
+  static const char *TAG_DE[] = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"};
+  static const char *TAG_EN[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  const char *tag = a.tm_yday == h.tm_yday ? TX("Heute", "Today")
+                    : a.tm_yday == (h.tm_yday + 1) % (h.tm_year % 4 ? 365 : 366) ? TX("Morgen", "Tomorrow")
+                                                                                  : TX(TAG_DE[a.tm_wday], TAG_EN[a.tm_wday]);
+  int minuten = max(1L, (long)lroundf((iss.sichtBis - iss.sichtAb) / 60.0f));
+  // vier Teile: wann, wie lange, woher/wohin, wie hoch - quer je zwei in einer Zeile, hochkant untereinander
+  char wann[24], dauer[24], weg[24], gipfel[24];
+  if (lauft && jetzt >= iss.sichtAb && jetzt <= iss.sichtBis) {  // gerade zu sehen: wohin schauen?
+    const SatPunkt &p = iss.bahn[constrain((int)((jetzt - iss.start) / SAT_SCHRITT), 0, iss.punkte - 1)];
+    snprintf(wann, sizeof(wann), TX("Schau nach %s", "Look %s"), richtung(p.az10 / 10.0f));
+    snprintf(dauer, sizeof(dauer), TX("%d° hoch", "%d° up"), p.el10 / 10);
+  } else {
+    snprintf(wann, sizeof(wann), "%s %02d:%02d", tag, a.tm_hour, a.tm_min);
+    snprintf(dauer, sizeof(dauer), TX("%d min sichtbar", "visible %d min"), minuten);
+  }
+  snprintf(weg, sizeof(weg), TX("von %s nach %s", "from %s to %s"), richtung(iss.azAb), richtung(iss.azBis));
+  snprintf(gipfel, sizeof(gipfel), TX("bis %d° hoch", "up to %d°"), (int)lroundf(iss.maxHoehe));
+  if (hk) {
+    schrift(bild, S_MF);
+    schreibe(bild, wann, ox + B / 2, 236, WEISS, MITTE);
+    schrift(bild, S_K);
+    schreibe(bild, dauer, ox + B / 2, 256, WEISS, MITTE);
+    schreibe(bild, weg, ox + B / 2, 276, HELL, MITTE);
+    schreibe(bild, gipfel, ox + B / 2, 294, HELL, MITTE);
+  } else {
+    char z1[52], z2[52];
+    snprintf(z1, sizeof(z1), "%s · %s", wann, dauer);
+    snprintf(z2, sizeof(z2), "%s · %s", weg, gipfel);
+    schrift(bild, S_M);
+    schreibe(bild, z1, ox + B / 2, 143, WEISS, MITTE);
+    schrift(bild, S_K);
+    schreibe(bild, z2, ox + B / 2, 158, HELL, MITTE);
+  }
+}
+
+// ------------------------------------------------------------
+// Seite 4: Mond (rechnet das Geraet selbst aus dem Datum)
 // ------------------------------------------------------------
 void seiteMond(int ox, uint32_t t) {
   titel(ox, TX("Mond", "Moon"), t);
@@ -418,12 +590,12 @@ void seiteMond(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 4: Demnaechst - was die Himmelsstation bald kann
+// Seite 5: Demnaechst - was die Himmelsstation bald kann
 // ------------------------------------------------------------
 void seiteDemnaechst(int ox, uint32_t t) {
   titel(ox, TX("Demnächst", "Coming soon"), t);
-  static const char *DE[] = {"Seeing & Durchsicht", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts", "Meteorströme & Finsternisse"};
-  static const char *EN[] = {"Seeing & transparency", "ISS & satellites", "Aurora alert", "Rocket launches", "Meteor showers & eclipses"};
+  static const char *DE[] = {"Seeing & Durchsicht", "Starlink-Ketten", "Polarlicht-Alarm", "Raketenstarts", "Meteorströme & Finsternisse"};
+  static const char *EN[] = {"Seeing & transparency", "Starlink trains", "Aurora alert", "Rocket launches", "Meteor showers & eclipses"};
   const bool hk = hoch();
   const int y0 = hk ? HOCH_TOP + 30 : 48, dy = hk ? 40 : 24, x = ox + (hk ? 26 : 30);
   for (int i = 0; i < 5; i++) {
@@ -443,8 +615,9 @@ void zeichneSeite(int s, int ox, uint32_t t) {
   switch (s) {
     case 0: seiteNacht(ox, t); break;
     case 1: seitePlaneten(ox, t); break;
-    case 2: seiteMond(ox, t); break;
-    case 3: seiteDemnaechst(ox, t); break;
+    case 2: seiteSatelliten(ox, t); break;
+    case 3: seiteMond(ox, t); break;
+    case 4: seiteDemnaechst(ox, t); break;
   }
 }
 
@@ -480,7 +653,12 @@ void statusLeiste() {
   }
 }
 
-bool seiteAn(int s) { return einst.seiten >> s & 1; }
+// Seite "Satelliten" nur, wenn in den naechsten 20 h einer zu sehen ist
+bool seiteAn(int s) {
+  if (!(einst.seiten >> s & 1)) return false;
+  if (s == 2) return satDa && sat.sichtAb - time(nullptr) < 20 * 3600;
+  return true;
+}
 
 void seitenPunkte() {
   int n = 0;
@@ -955,6 +1133,8 @@ void loop() {
   webLoop();
 
   bool hatDaten = himmelHolen(himmel);
+  satWeitere = satellitenHolen(sat, satListe, SAT_LISTE) - 1;
+  satDa = satWeitere >= 0;
   if (hatDaten) zeitzoneSetzen(himmel.utcAbweichung);
   tasten(t, hatDaten);
   lichtSetzen(t);
@@ -997,7 +1177,22 @@ void loop() {
     statusLeiste();
     seitenPunkte();
 
-    if (einst.wechsel && !wechsel && t - seiteSeit > einst.wechsel * 1000UL && t - letzterTastendruck > 30000)
+    // Satellit kommt: 5 min vorher einmal auf seine Seite springen und dort bleiben, bis er wieder weg ist
+    time_t jetzt = time(nullptr);
+    bool satGleich = satDa && seiteAn(2) && jetzt >= sat.sichtAb - 300 && jetzt <= sat.sichtBis;
+    static time_t satGesprungen = 0;
+    if (satGleich && satGesprungen != sat.start && !wechsel) {
+      satGesprungen = sat.start;
+      if (seite != 2) {
+        alteSeite = seite;
+        seite = 2;
+        wechsel = true;
+        wechselStart = t;
+        seiteSeit = t;
+      }
+    }
+    if (einst.wechsel && !wechsel && t - seiteSeit > einst.wechsel * 1000UL && t - letzterTastendruck > 30000 &&
+        !(satGleich && seite == 2))
       naechsteSeite(t);
   }
   lichtAnzeige(t);
