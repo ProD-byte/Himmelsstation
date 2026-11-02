@@ -2,7 +2,7 @@
 // Standort: am Handy gewaehlt (Einrichtung), sonst grob ueber die Internet-Adresse, sonst Cottbus
 //   Taster GPIO 0:  kurz = naechste Seite, 2 s halten = Sprache Deutsch/Englisch (zeigt auch Adresse + Build)
 //   Taster GPIO 14: kurz = Helligkeit, 3 s halten = WLAN und Ort neu einrichten
-// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Planeten, Satelliten, Mond, Demnaechst - weitere folgen
+// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Planeten, Satelliten, Weltraumwetter, Mond, Demnaechst
 // Zeitzone, Sonne und Wolken: open-meteo.com
 // WLAN: Einrichtung per Handy ueber das WLAN "Himmelsstation-Setup" (siehe wlan.cpp)
 // Einstellungen: http://himmelsstation.local (siehe web.cpp)
@@ -15,6 +15,8 @@
 #include <time.h>
 #include "himmel.h"
 #include "satelliten.h"
+#include "weltraum.h"
+#include "astro.h"
 #include "bilder.h"
 #include "wlan.h"
 #include "ort.h"
@@ -558,7 +560,154 @@ void seiteSatelliten(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 4: Mond (rechnet das Geraet selbst aus dem Datum)
+// Seite 4: Weltraumwetter - Kp-Index, Polarlicht-Chance fuer den eigenen Ort, Sonnenwind, Eruptionen
+// ------------------------------------------------------------
+Weltraum welt;
+bool weltDa = false;
+
+static uint16_t kpFarbe(float kp) {
+  if (kp < 4) return farbe(110, 220, 120);
+  if (kp < 5) return farbe(240, 220, 90);
+  if (kp < 6) return farbe(255, 160, 60);
+  if (kp < 7) return farbe(255, 100, 60);
+  return farbe(240, 70, 130);
+}
+
+static uint16_t flareFarbe(const char *k) {
+  if (*k == 'X') return farbe(255, 80, 90);
+  if (*k == 'M') return farbe(255, 160, 60);
+  if (*k == 'C') return farbe(240, 220, 90);
+  return HELL;
+}
+
+// Polarlicht: gruene Vorhaenge mit violettem Saum, die langsam wabern. staerke 0..1
+void polarlicht(int ox, int oben, int hoehe, uint32_t t, float staerke) {
+  for (int x = 0; x < B; x += 2) {
+    int sx = ox + x;
+    if (sx < 0 || sx >= B) continue;
+    float basis = oben + hoehe * 0.75f + 6 * sinf(x * 0.031f + t * 0.0007f) + 4 * sinf(x * 0.071f - t * 0.0011f);
+    float lang = hoehe * (0.45f + 0.25f * sinf(x * 0.047f + t * 0.0009f));
+    float flackern = 0.55f + 0.45f * sinf(x * 0.21f + t * 0.0031f) * sinf(x * 0.05f - t * 0.0013f);
+    for (int y = (int)(basis - lang); y < (int)basis; y++) {
+      if (y < 0 || y >= H) continue;
+      float p = (basis - y) / lang;  // 0 unten (gruen) .. 1 oben (violett, blass)
+      uint16_t f = p < 0.6f ? farbe(70, 255, 150) : farbe(170, 90, 255);
+      float a = staerke * flackern * (p < 0.6f ? 0.55f : 0.35f * (1 - p) * 2.5f);
+      if (a <= 0.02f) continue;
+      uint16_t alt = bild.readPixel(sx, y);
+      uint16_t neu = bild.alphaBlend(constrain((int)(a * 255), 0, 255), f, alt);
+      bild.drawPixel(sx, y, neu);
+      bild.drawPixel(sx + 1, y, neu);
+    }
+  }
+}
+
+// Polarlicht-Chance heute Nacht: 0 = unwahrscheinlich, 1 = knapp, 2 = moeglich
+static int polarlichtChance(float &kpMax, float &noetig) {
+  const Nacht &n = himmel.nacht;
+  Ort o = ortAktuell();
+  noetig = kpFuerPolarlicht(o.lat, o.lon);
+  time_t von = n.dunkelArt ? n.dunkelVon : n.mittag + 6 * 3600, bis = n.dunkelArt ? n.dunkelBis : n.mittag + 18 * 3600;
+  kpMax = kpMaxZwischen(welt, max(von, time(nullptr) - 3 * 3600), bis);
+  if (kpMax < 0) return -1;
+  return kpMax >= noetig ? 2 : kpMax >= noetig - 1 ? 1 : 0;
+}
+
+void seiteWeltraum(int ox, uint32_t t) {
+  titel(ox, TX("Weltraumwetter", "Space weather"), t);
+  if (!weltDa) {
+    passend(TX("Hole Daten von NOAA ...", "Loading NOAA data ..."), ox + B / 2, H / 2, B - 12, HELL, S_M, MITTE);
+    return;
+  }
+  const bool hk = hoch();
+  time_t jetzt = time(nullptr);
+  char z[64];
+  float kp = kpZu(welt, jetzt), kpMax, noetig;
+  int chance = polarlichtChance(kpMax, noetig);
+  if (chance >= 1) polarlicht(ox, hk ? 60 : 24, hk ? 90 : 60, t, chance == 2 ? 1.0f : 0.5f);
+
+  // Kp jetzt und Zustand
+  char kpText[16], zustand[24];
+  snprintf(kpText, sizeof(kpText), "Kp %.1f", max(0.0f, kp));
+  if (!einst.sprache) for (char *c = kpText; *c; c++) if (*c == '.') *c = ',';
+  if (kp < 4) strlcpy(zustand, TX("ruhig", "quiet"), sizeof(zustand));
+  else if (kp < 5) strlcpy(zustand, TX("unruhig", "unsettled"), sizeof(zustand));
+  else snprintf(zustand, sizeof(zustand), TX("Sturm G%d", "storm G%d"), constrain((int)lroundf(kp) - 4, 1, 5));
+  const char *chanceText = chance < 0 ? "?" : chance == 2 ? TX("möglich!", "possible!") : chance == 1 ? TX("knapp", "borderline") : TX("unwahrscheinlich", "unlikely");
+  uint16_t chanceFarbe = chance == 2 ? farbe(110, 255, 160) : chance == 1 ? farbe(240, 220, 90) : HELL;
+  char ab[32];
+  snprintf(ab, sizeof(ab), TX("bei dir ab Kp %d", "needs Kp %d here"), (int)ceilf(noetig - 0.2f));
+
+  // Verlauf: letzte 24 h gemessen, dann Vorhersage; gestrichelt die Polarlicht-Schwelle fuer den Ort
+  const int gx = ox + 10, gb = B - 20, gy = hk ? 162 : 72, gh = hk ? 48 : 38;
+  time_t von = jetzt - 24 * 3600, bis = welt.kpAb + welt.kpN * 3 * 3600;
+  if (bis - von < 24 * 3600) bis = von + 4 * 86400;
+  auto xVon = [&](time_t z2) { return gx + (int)((int64_t)(z2 - von) * gb / (bis - von)); };
+  for (int i = 0; i < welt.kpN; i++) {
+    time_t a = welt.kpAb + i * 3 * 3600;
+    if (a + 3 * 3600 <= von || a >= bis) continue;
+    int x0 = max(gx, xVon(a)), x1 = min(gx + gb, xVon(a + 3 * 3600)) - 1;
+    int h = (int)(constrain(welt.kp[i], 0.0f, 9.0f) / 9 * gh);
+    uint16_t f = kpFarbe(welt.kp[i]);
+    if (welt.kpArt[i] == 2) f = bild.alphaBlend(120, f, hintergrund(x0, gy + gh - h));  // Vorhersage blasser
+    if (h > 0 && x1 >= x0) bild.fillRect(x0, gy + gh - h, x1 - x0 + 1, h, f);
+  }
+  bild.drawFastHLine(gx, gy + gh, gb, bild.alphaBlend(140, WEISS, hintergrund(gx, gy + gh)));
+  int sy = gy + gh - (int)(constrain(noetig, 0.0f, 9.0f) / 9 * gh);
+  for (int x = gx; x < gx + gb; x += 6) bild.drawFastHLine(x, sy, 3, farbe(110, 255, 160));
+  int jx = xVon(jetzt);
+  bild.drawFastVLine(jx, gy - 2, gh + 4, farbe(255, 214, 120));
+  // Tage beschriften (Mitte jedes Tages in Ortszeit)
+  schrift(bild, S_K);
+  static const char *WT_DE[] = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"}, *WT_EN[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  struct tm lt;
+  localtime_r(&von, &lt);
+  time_t mittag = von - (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec) + 12 * 3600;
+  for (time_t m = mittag; m < bis; m += 86400) {
+    if (m < von + 3600) continue;
+    struct tm d;
+    localtime_r(&m, &d);
+    schreibe(bild, TX(WT_DE[d.tm_wday], WT_EN[d.tm_wday]), xVon(m), gy + gh + 13, HELL, MITTE);
+  }
+
+  // Sonnenwind und Eruptionen
+  char wind[32], f24[40], f7[40];
+  if (welt.wind) snprintf(wind, sizeof(wind), TX("Sonnenwind %d km/s", "Solar wind %d km/s"), welt.wind);
+  else strlcpy(wind, TX("Sonnenwind ?", "Solar wind ?"), sizeof(wind));
+  snprintf(f24, sizeof(f24), TX("Flare 24 h: %s", "Flare 24 h: %s"), *welt.flare24 ? welt.flare24 : "–");
+  if (*welt.flare7) {
+    struct tm d;
+    localtime_r(&welt.flare7Zeit, &d);
+    snprintf(f7, sizeof(f7), TX("7 Tage: %s (%s)", "7 days: %s (%s)"), welt.flare7, TX(WT_DE[d.tm_wday], WT_EN[d.tm_wday]));
+  } else {
+    strlcpy(f7, TX("7 Tage: –", "7 days: –"), sizeof(f7));
+  }
+
+  if (hk) {
+    passend(kpText, ox + B / 2, 82, B - 12, kpFarbe(kp), S_GF, MITTE);
+    passend(zustand, ox + B / 2, 100, B - 12, HELL, S_K, MITTE);
+    passend(TX("Polarlicht heute Nacht", "Aurora tonight"), ox + B / 2, 122, B - 12, HELL, S_K, MITTE);
+    passend(chanceText, ox + B / 2, 140, B - 12, chanceFarbe, S_MF, MITTE);
+    passend(ab, ox + B / 2, 152 - 0, B - 12, HELL, S_K, MITTE);
+    passend(wind, ox + B / 2, 242, B - 12, HELL, S_K, MITTE);
+    passend(f24, ox + B / 2, 260, B - 12, flareFarbe(welt.flare24), S_K, MITTE);
+    passend(f7, ox + B / 2, 278, B - 12, flareFarbe(welt.flare7), S_K, MITTE);
+  } else {
+    schrift(bild, S_GF);
+    int kb = breite(bild, kpText);
+    schreibe(bild, kpText, ox + 8, 50, kpFarbe(kp), LINKS);
+    passend(zustand, ox + 14 + kb, 50, 80, HELL, S_K, LINKS);
+    passend(TX("Polarlicht:", "Aurora:"), ox + B - 8, 36, 150, HELL, S_K, RECHTS);
+    passend(chanceText, ox + B - 8, 52, 150, chanceFarbe, S_MF, RECHTS);
+    passend(ab, ox + B - 8, 66, 150, HELL, S_K, RECHTS);
+    snprintf(z, sizeof(z), "%s · %s", wind, f24);
+    passend(z, ox + B / 2, 140, B - 12, HELL, S_K, MITTE);
+    passend(f7, ox + B / 2, 156, B - 12, flareFarbe(welt.flare7), S_K, MITTE);
+  }
+}
+
+// ------------------------------------------------------------
+// Seite 5: Mond (rechnet das Geraet selbst aus dem Datum)
 // ------------------------------------------------------------
 void seiteMond(int ox, uint32_t t) {
   titel(ox, TX("Mond", "Moon"), t);
@@ -590,12 +739,12 @@ void seiteMond(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 5: Demnaechst - was die Himmelsstation bald kann
+// Seite 6: Demnaechst - was die Himmelsstation bald kann
 // ------------------------------------------------------------
 void seiteDemnaechst(int ox, uint32_t t) {
   titel(ox, TX("Demnächst", "Coming soon"), t);
-  static const char *DE[] = {"Seeing & Durchsicht", "Starlink-Ketten", "Polarlicht-Alarm", "Raketenstarts", "Meteorströme & Finsternisse"};
-  static const char *EN[] = {"Seeing & transparency", "Starlink trains", "Aurora alert", "Rocket launches", "Meteor showers & eclipses"};
+  static const char *DE[] = {"Raketenstarts", "Seeing & Durchsicht", "Starlink-Ketten", "Meteorströme & Finsternisse", "Die Sonne live (SDO)"};
+  static const char *EN[] = {"Rocket launches", "Seeing & transparency", "Starlink trains", "Meteor showers & eclipses", "The sun live (SDO)"};
   const bool hk = hoch();
   const int y0 = hk ? HOCH_TOP + 30 : 48, dy = hk ? 40 : 24, x = ox + (hk ? 26 : 30);
   for (int i = 0; i < 5; i++) {
@@ -616,8 +765,9 @@ void zeichneSeite(int s, int ox, uint32_t t) {
     case 0: seiteNacht(ox, t); break;
     case 1: seitePlaneten(ox, t); break;
     case 2: seiteSatelliten(ox, t); break;
-    case 3: seiteMond(ox, t); break;
-    case 4: seiteDemnaechst(ox, t); break;
+    case 3: seiteWeltraum(ox, t); break;
+    case 4: seiteMond(ox, t); break;
+    case 5: seiteDemnaechst(ox, t); break;
   }
 }
 
@@ -1135,6 +1285,7 @@ void loop() {
   bool hatDaten = himmelHolen(himmel);
   satWeitere = satellitenHolen(sat, satListe, SAT_LISTE) - 1;
   satDa = satWeitere >= 0;
+  weltDa = weltraumHolen(welt);
   if (hatDaten) zeitzoneSetzen(himmel.utcAbweichung);
   tasten(t, hatDaten);
   lichtSetzen(t);
@@ -1191,8 +1342,21 @@ void loop() {
         seiteSeit = t;
       }
     }
+    // Polarlicht-Alarm: Kp reicht jetzt fast fuer den Ort, und es ist dunkel -> hinspringen (hoechstens einmal pro Stunde)
+    static uint32_t polarGesprungen = 0;
+    Ort ort = ortAktuell();
+    float kpJetzt = weltDa ? kpZu(welt, jetzt) : -1;
+    bool polarAlarm = seiteAn(3) && kpJetzt >= kpFuerPolarlicht(ort.lat, ort.lon) - 0.67f && sonneHoehe(jetzt, ort.lat, ort.lon) < -12;
+    if (polarAlarm && !satGleich && !wechsel && seite != 3 && (!polarGesprungen || t - polarGesprungen > 3600000UL)) {
+      polarGesprungen = t;
+      alteSeite = seite;
+      seite = 3;
+      wechsel = true;
+      wechselStart = t;
+      seiteSeit = t;
+    }
     if (einst.wechsel && !wechsel && t - seiteSeit > einst.wechsel * 1000UL && t - letzterTastendruck > 30000 &&
-        !(satGleich && seite == 2))
+        !(satGleich && seite == 2) && !(polarAlarm && seite == 3))
       naechsteSeite(t);
   }
   lichtAnzeige(t);

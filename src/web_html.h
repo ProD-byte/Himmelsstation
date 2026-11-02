@@ -147,7 +147,7 @@ function zeigen() {
   $('#ortArt').textContent = st.gewaehlt ? L('selbst gewählt', 'chosen by you') : L('ungefähr ermittelt über den Internetanschluss', 'roughly detected via your internet connection');
   const LICHT = ['100 %', '55 %', '25 %', '6 %'];
   $('#licht').innerHTML = LICHT.map((t, i) => `<button data-i="${i}" class="${i === e.licht ? 'an' : ''}">${t}</button>`).join('');
-  const SEITEN = L(['Heute Nacht', 'Planeten', 'Satelliten', 'Mond', 'Demnächst'], ['Tonight', 'Planets', 'Satellites', 'Moon', 'Coming soon']);
+  const SEITEN = L(['Heute Nacht', 'Planeten', 'Satelliten', 'Weltraumwetter', 'Mond', 'Demnächst'], ['Tonight', 'Planets', 'Satellites', 'Space weather', 'Moon', 'Coming soon']);
   $('#seiten').innerHTML = SEITEN.map((t, i) => `<button data-i="${i}" class="${e.seiten >> i & 1 ? 'an' : ''}">${esc(t)}</button>`).join('');
   const WECHSEL = [[0, L('nur per Taste', 'button only')], [8, '8 s'], [12, '12 s'], [20, '20 s'], [30, '30 s'], [60, L('1 Minute', '1 minute')]];
   $('#wechsel').innerHTML = WECHSEL.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');

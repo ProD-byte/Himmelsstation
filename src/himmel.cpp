@@ -3,6 +3,7 @@
 #include "einstellungen.h"
 #include "netzupdate.h"
 #include "satelliten.h"
+#include "weltraum.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -191,6 +192,9 @@ static void aufgabe(void *) {
       Ort o = ortAktuell();
       satellitenAktualisieren(o.lat, o.lon);
     }
+
+    // Weltraumwetter von NOAA (alle 15 min)
+    if (aktuell.gueltig) weltraumAktualisieren();
 
     // Neue Firmware auf GitHub? (erst wenn alles laeuft, dann alle 6 Stunden oder auf Wunsch)
     if (aktuell.gueltig && ((int32_t)(millis() - naechstesUpdate) >= 0 || updateSucheGewuenscht())) {
