@@ -2,7 +2,7 @@
 // Standort: am Handy gewaehlt (Einrichtung), sonst grob ueber die Internet-Adresse, sonst Cottbus
 //   Taster GPIO 0:  kurz = naechste Seite, 2 s halten = Sprache Deutsch/Englisch (zeigt auch Adresse + Build)
 //   Taster GPIO 14: kurz = Helligkeit, 3 s halten = WLAN und Ort neu einrichten
-// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Planeten, Satelliten, Weltraumwetter, Mond, Demnaechst
+// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Planeten, Satelliten, Weltraumwetter, Raketenstarts, Mond, Demnaechst
 // Zeitzone, Sonne und Wolken: open-meteo.com
 // WLAN: Einrichtung per Handy ueber das WLAN "Himmelsstation-Setup" (siehe wlan.cpp)
 // Einstellungen: http://himmelsstation.local (siehe web.cpp)
@@ -16,6 +16,7 @@
 #include "himmel.h"
 #include "satelliten.h"
 #include "weltraum.h"
+#include "starts.h"
 #include "astro.h"
 #include "bilder.h"
 #include "wlan.h"
@@ -707,7 +708,140 @@ void seiteWeltraum(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 5: Mond (rechnet das Geraet selbst aus dem Datum)
+// Seite 5: Raketenstarts - der naechste Start weltweit mit Countdown, kurz vorher springt die Station hin
+// ------------------------------------------------------------
+Starts starts;
+bool startsDa = false;
+
+// Der Start fuer die grosse Anzeige: ein gerade gestarteter bleibt noch 1 h stehen, sonst der naechste
+static int hauptStart() {
+  time_t jetzt = time(nullptr);
+  for (int i = 0; i < starts.n; i++)
+    if (starts.s[i].net > jetzt - 3600) return i;
+  return -1;
+}
+
+static bool gestartet(const Start &s) {
+  return !strcmp(s.status, "In Flight") || !strcmp(s.status, "Success") || !strcmp(s.status, "Deployed") ||
+         !strcmp(s.status, "Failure") || !strcmp(s.status, "Partial Failure");
+}
+
+static const char *statusText(const Start &s, uint16_t &f) {
+  const char *a = s.status;
+  if (!strcmp(a, "Go")) return f = farbe(110, 230, 130), "Go";
+  if (!strcmp(a, "Hold")) return f = farbe(255, 160, 60), TX("angehalten", "hold");
+  if (!strcmp(a, "In Flight")) return f = farbe(120, 210, 255), TX("im Flug", "in flight");
+  if (!strcmp(a, "Success") || !strcmp(a, "Deployed")) return f = farbe(110, 230, 130), TX("erfolgreich", "success");
+  if (strstr(a, "Failure")) return f = farbe(255, 90, 90), TX("fehlgeschlagen", "failed");
+  if (!strcmp(a, "TBC")) return f = farbe(240, 220, 90), TX("noch unsicher", "to be confirmed");
+  return f = HELL, TX("Termin offen", "date open");
+}
+
+// Kleine Rakete auf der Startrampe; zittert kurz vor dem Start, hebt danach mit Flamme und Rauch ab
+void raketeZeichnen(int x, int boden, uint32_t t, long d, bool fliegt) {
+  const uint16_t weiss = farbe(236, 240, 246), grau = farbe(150, 158, 175), rot = farbe(230, 80, 70);
+  bild.drawFastHLine(x - 18, boden, 36, grau);  // Rampe
+  bild.drawFastVLine(x - 12, boden - 44, 44, grau);  // Turm
+  for (int y = boden - 40; y < boden; y += 8) bild.drawLine(x - 12, y, x - 7, y + 4, grau);
+  int hub = 0, zittern = 0;
+  if (fliegt) hub = (t % 4000) * (boden - 20) / 4000;  // steigt in 4 s hoch, dann von vorn
+  else if (d >= 0 && d <= 600) zittern = (t / 60) % 2 ? 1 : -1;
+  int y = boden - 4 - hub, rx = x + zittern;
+  if (y < -40) return;
+  // Flamme und Rauch
+  if (fliegt || (d >= 0 && d < 10)) {
+    int lang = 10 + (t / 40) % 6;
+    bild.fillTriangle(rx - 4, y, rx + 4, y, rx, y + lang, farbe(255, 170, 40));
+    bild.fillTriangle(rx - 2, y, rx + 2, y, rx, y + lang - 4, farbe(255, 240, 160));
+    for (int k = 0; k < 5; k++) {
+      int ry = min(boden, y + lang + k * 5), r = 3 + k;
+      bild.fillSmoothCircle(rx + (k % 2 ? r : -r) / 2, ry, r, bild.alphaBlend(150 - k * 25, farbe(200, 205, 215), hintergrund(rx, ry)));
+    }
+  } else if (d >= 0 && d <= 600) {  // Dampf kurz vor dem Start
+    float p = (t % 1500) / 1500.0f;
+    bild.fillSmoothCircle(x + 6 + p * 8, boden - 4 - p * 6, 2 + p * 3, bild.alphaBlend(120 * (1 - p), farbe(220, 225, 235), hintergrund(x + 8, boden - 6)));
+  }
+  // Rakete: Koerper, Spitze, Fenster, Flossen
+  bild.fillRoundRect(rx - 4, y - 30, 9, 30, 2, weiss);
+  bild.fillTriangle(rx - 4, y - 30, rx + 4, y - 30, rx, y - 40, rot);
+  bild.fillSmoothCircle(rx, y - 21, 2, farbe(90, 140, 220));
+  bild.fillTriangle(rx - 4, y - 8, rx - 4, y, rx - 9, y, rot);
+  bild.fillTriangle(rx + 4, y - 8, rx + 4, y, rx + 9, y, rot);
+}
+
+void seiteStarts(int ox, uint32_t t) {
+  titel(ox, TX("Raketenstarts", "Rocket launches"), t);
+  int h = startsDa ? hauptStart() : -1;
+  if (h < 0) {
+    passend(startsDa ? TX("Kein Start angekündigt", "No launch scheduled") : TX("Hole Startliste ...", "Loading launches ..."),
+            ox + B / 2, H / 2, B - 12, HELL, S_M, MITTE);
+    return;
+  }
+  const Start &s = starts.s[h];
+  const bool hk = hoch();
+  time_t jetzt = time(nullptr);
+  long d = s.net - jetzt;
+  bool fliegt = gestartet(s) || (d <= 0 && d > -600 && strcmp(s.status, "Hold") && strcmp(s.status, "TBD"));
+
+  // Countdown
+  char cd[32];
+  long a = labs(d);
+  if (d >= 86400) snprintf(cd, sizeof(cd), TX("in %ld T %ld h", "in %ld d %ld h"), d / 86400, d % 86400 / 3600);
+  else if (d >= 3600) snprintf(cd, sizeof(cd), "T- %ld h %02ld min", d / 3600, d % 3600 / 60);
+  else snprintf(cd, sizeof(cd), "T%c %02ld:%02ld", d >= 0 ? '-' : '+', a / 60, a % 60);
+  uint16_t stFarbe;
+  const char *st = statusText(s, stFarbe);
+
+  char z[80], wann[24];
+  struct tm lt, ht;
+  localtime_r(&s.net, &lt);
+  localtime_r(&jetzt, &ht);
+  static const char *WT_DE[] = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"}, *WT_EN[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  const char *tag = lt.tm_yday == ht.tm_yday ? TX("heute", "today") : TX(WT_DE[lt.tm_wday], WT_EN[lt.tm_wday]);
+  snprintf(wann, sizeof(wann), "%s %02d:%02d", tag, lt.tm_hour, lt.tm_min);
+
+  if (hk) {
+    raketeZeichnen(ox + B / 2 + 6, 128, t, d, fliegt);
+    passend(cd, ox + B / 2, 156, B - 12, farbe(255, 214, 120), S_GF, MITTE);
+    passend(st, ox + B / 2, 174, B - 12, stFarbe, S_K, MITTE);
+    passend(s.rakete, ox + B / 2, 198, B - 12, WEISS, S_MF, MITTE);
+    passend(s.betreiber, ox + B / 2, 214, B - 12, HELL, S_K, MITTE);
+    snprintf(z, sizeof(z), *s.bahn ? "%s · %s" : "%s%s", s.mission, s.bahn);
+    passend(z, ox + B / 2, 234, B - 12, WEISS, S_K, MITTE);
+    passend(s.ort, ox + B / 2, 252, B - 12, HELL, S_K, MITTE);
+    snprintf(z, sizeof(z), TX("Start %s", "Launch %s"), wann);
+    passend(z, ox + B / 2, 270, B - 12, HELL, S_K, MITTE);
+  } else {
+    raketeZeichnen(ox + 290, 128, t, d, fliegt);
+    schrift(bild, S_GF);
+    int cb = breite(bild, cd);
+    schreibe(bild, cd, ox + 8, 46, farbe(255, 214, 120), LINKS);
+    passend(st, ox + 16 + cb, 46, 250 - cb, stFarbe, S_K, LINKS);
+    schrift(bild, S_MF);
+    int rb = min(breite(bild, s.rakete), 170);
+    passend(s.rakete, ox + 8, 68, 170, WEISS, S_MF, LINKS);
+    passend(s.betreiber, ox + 14 + rb, 68, 250 - rb, HELL, S_K, LINKS);
+    snprintf(z, sizeof(z), *s.bahn ? "%s · %s" : "%s%s", s.mission, s.bahn);
+    passend(z, ox + 8, 86, 250, WEISS, S_M, LINKS);
+    passend(s.ort, ox + 8, 103, 250, HELL, S_K, LINKS);
+    snprintf(z, sizeof(z), TX("Start %s", "Launch %s"), wann);
+    passend(z, ox + 8, 119, 250, HELL, S_K, LINKS);
+  }
+
+  // die naechsten danach
+  int zeile = 0;
+  for (int i = h + 1; i < starts.n && zeile < 2; i++, zeile++) {
+    const Start &n = starts.s[i];
+    struct tm nt;
+    localtime_r(&n.net, &nt);
+    const char *ntag = nt.tm_yday == ht.tm_yday ? TX("heute", "today") : TX(WT_DE[nt.tm_wday], WT_EN[nt.tm_wday]);
+    snprintf(z, sizeof(z), *n.land ? "%s %02d:%02d · %s · %s" : "%s %02d:%02d · %s%s", ntag, nt.tm_hour, nt.tm_min, n.rakete, n.land);
+    passend(z, ox + (hk ? B / 2 : 8), (hk ? 292 : 142) + zeile * (hk ? 16 : 15), B - 16, farbe(150, 160, 190), S_K, hk ? MITTE : LINKS);
+  }
+}
+
+// ------------------------------------------------------------
+// Seite 6: Mond (rechnet das Geraet selbst aus dem Datum)
 // ------------------------------------------------------------
 void seiteMond(int ox, uint32_t t) {
   titel(ox, TX("Mond", "Moon"), t);
@@ -739,12 +873,12 @@ void seiteMond(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 6: Demnaechst - was die Himmelsstation bald kann
+// Seite 7: Demnaechst - was die Himmelsstation bald kann
 // ------------------------------------------------------------
 void seiteDemnaechst(int ox, uint32_t t) {
   titel(ox, TX("Demnächst", "Coming soon"), t);
-  static const char *DE[] = {"Raketenstarts", "Seeing & Durchsicht", "Starlink-Ketten", "Meteorströme & Finsternisse", "Die Sonne live (SDO)"};
-  static const char *EN[] = {"Rocket launches", "Seeing & transparency", "Starlink trains", "Meteor showers & eclipses", "The sun live (SDO)"};
+  static const char *DE[] = {"Seeing & Durchsicht", "Starlink-Ketten", "Meteorströme", "Finsternisse", "Die Sonne live (SDO)"};
+  static const char *EN[] = {"Seeing & transparency", "Starlink trains", "Meteor showers", "Eclipses", "The sun live (SDO)"};
   const bool hk = hoch();
   const int y0 = hk ? HOCH_TOP + 30 : 48, dy = hk ? 40 : 24, x = ox + (hk ? 26 : 30);
   for (int i = 0; i < 5; i++) {
@@ -766,8 +900,9 @@ void zeichneSeite(int s, int ox, uint32_t t) {
     case 1: seitePlaneten(ox, t); break;
     case 2: seiteSatelliten(ox, t); break;
     case 3: seiteWeltraum(ox, t); break;
-    case 4: seiteMond(ox, t); break;
-    case 5: seiteDemnaechst(ox, t); break;
+    case 4: seiteStarts(ox, t); break;
+    case 5: seiteMond(ox, t); break;
+    case 6: seiteDemnaechst(ox, t); break;
   }
 }
 
@@ -1286,6 +1421,7 @@ void loop() {
   satWeitere = satellitenHolen(sat, satListe, SAT_LISTE) - 1;
   satDa = satWeitere >= 0;
   weltDa = weltraumHolen(welt);
+  startsDa = startsHolen(starts);
   if (hatDaten) zeitzoneSetzen(himmel.utcAbweichung);
   tasten(t, hatDaten);
   lichtSetzen(t);
@@ -1355,8 +1491,24 @@ void loop() {
       wechselStart = t;
       seiteSeit = t;
     }
+    // Raketenstart: 10 min vorher einmal hinspringen, bis 5 min nach dem Start dort bleiben
+    int hs = startsDa ? hauptStart() : -1;
+    long bisStart = hs >= 0 ? starts.s[hs].net - jetzt : 99999;
+    bool startGleich = seiteAn(4) && hs >= 0 && bisStart <= 600 && bisStart > -300 &&
+                       (strcmp(starts.s[hs].status, "Go") == 0 || gestartet(starts.s[hs]));
+    static time_t startGesprungen = 0;
+    if (startGleich && !satGleich && !wechsel && startGesprungen != starts.s[hs].net) {
+      startGesprungen = starts.s[hs].net;
+      if (seite != 4) {
+        alteSeite = seite;
+        seite = 4;
+        wechsel = true;
+        wechselStart = t;
+        seiteSeit = t;
+      }
+    }
     if (einst.wechsel && !wechsel && t - seiteSeit > einst.wechsel * 1000UL && t - letzterTastendruck > 30000 &&
-        !(satGleich && seite == 2) && !(polarAlarm && seite == 3))
+        !(satGleich && seite == 2) && !(polarAlarm && seite == 3) && !(startGleich && seite == 4))
       naechsteSeite(t);
   }
   lichtAnzeige(t);

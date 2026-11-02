@@ -4,6 +4,7 @@
 #include "netzupdate.h"
 #include "satelliten.h"
 #include "weltraum.h"
+#include "starts.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -195,6 +196,8 @@ static void aufgabe(void *) {
 
     // Weltraumwetter von NOAA (alle 15 min)
     if (aktuell.gueltig) weltraumAktualisieren();
+    // Raketenstarts (alle 30 min, kurz vor einem Start alle 10 min)
+    if (aktuell.gueltig) startsAktualisieren();
 
     // Neue Firmware auf GitHub? (erst wenn alles laeuft, dann alle 6 Stunden oder auf Wunsch)
     if (aktuell.gueltig && ((int32_t)(millis() - naechstesUpdate) >= 0 || updateSucheGewuenscht())) {

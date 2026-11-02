@@ -13,7 +13,7 @@
     <canvas id="hsLcd" width="640" height="340"></canvas>
     <div class="tasten"><button id="hsWeiter" title="IO0">IO0</button><button id="hsLicht" title="IO14">IO14</button></div>
   </div>
-  <p class="leise" id="hsText">Für Cottbus, mit echten Wolken von Open-Meteo. Dämmerung, Mond, Planeten und Satelliten rechnet die Himmelsstation selbst aus. Weltraumwetter live von NOAA. Taste IO0 blättert weiter. Raketenstarts kommen als Nächstes.</p>
+  <p class="leise" id="hsText">Für Cottbus, mit echten Wolken von Open-Meteo. Dämmerung, Mond, Planeten und Satelliten rechnet die Himmelsstation selbst aus. Weltraumwetter live von NOAA, Raketenstarts von Launch Library 2. Taste IO0 blättert weiter.</p>
 </div>
 <script>
 (() => {
@@ -21,7 +21,7 @@
   const cv = document.getElementById("hsLcd"), c = cv.getContext("2d");
   const W = 320, H = 170, en = /[?&]en\b/.test(location.search);
   const L = (de, e) => en ? e : de;
-  if (en) document.getElementById("hsText").textContent = "For Cottbus, with real clouds from Open-Meteo. The sky station works out twilight, moon, planets and satellites by itself. Live space weather from NOAA. Button IO0 turns the page. Rocket launches are next.";
+  if (en) document.getElementById("hsText").textContent = "For Cottbus, with real clouds from Open-Meteo. The sky station works out twilight, moon, planets and satellites by itself. Live space weather from NOAA, rocket launches from Launch Library 2. Button IO0 turns the page.";
   const sterne = Array.from({ length: 60 }, (_, i) => [(i * 97.3) % W, (i * 53.9) % H, (i * 0.71) % 6.3, i % 7 === 0 ? 1.2 : 0.7]);
   let seite = 0, alt = 0, wechselStart = -1e9, seiteSeit = 0, licht = 0;
   const t0 = performance.now();
@@ -392,6 +392,64 @@
     passend(`${wind} · Flare 24 h: ${welt.f24 || "–"}`, ox + W / 2, 140, W - 12, "#d8eaf2", 12, false, "center");
     passend(welt.f7 ? L(`7 Tage: ${welt.f7} (${WT[new Date((welt.f7Zeit + abw) * 1000).getUTCDay()]})`, `7 days: ${welt.f7} (${WT[new Date((welt.f7Zeit + abw) * 1000).getUTCDay()]})`) : L("7 Tage: –", "7 days: –"), ox + W / 2, 156, W - 12, flareFarbe(welt.f7 || ""), 12, false, "center");
   }
+  // ---------- Raketenstarts (wie starts.cpp und seiteStarts in main.cpp; echte Liste von Launch Library 2) ----------
+  let starts = null;
+  fetch("https://ll.thespacedevs.com/2.3.0/launches/upcoming/?limit=5&mode=normal").then(r => r.json()).then(j => {
+    starts = j.results.slice(0, 4).map(r => ({
+      net: utcZeit(r.net), status: r.status?.abbrev || "", rakete: r.rocket?.configuration?.name || "",
+      mission: r.mission?.name || (r.name.split("| ")[1] || r.name), betreiber: r.launch_service_provider?.name || "",
+      ort: (r.pad?.location?.name || "").split(",")[0] + (r.pad?.country?.alpha_2_code ? " · " + r.pad.country.alpha_2_code : ""), land: r.pad?.country?.alpha_2_code || "", bahn: r.mission?.orbit?.abbrev || ""
+    }));
+  }).catch(() => { starts = false; });
+  const gestartet = s2 => ["In Flight", "Success", "Deployed", "Failure", "Partial Failure"].includes(s2.status);
+  function statusText(s2) {
+    const a = s2.status;
+    if (a === "Go") return ["Go", "rgb(110,230,130)"];
+    if (a === "Hold") return [L("angehalten", "hold"), "rgb(255,160,60)"];
+    if (a === "In Flight") return [L("im Flug", "in flight"), "rgb(120,210,255)"];
+    if (a === "Success" || a === "Deployed") return [L("erfolgreich", "success"), "rgb(110,230,130)"];
+    if (a.includes("Failure")) return [L("fehlgeschlagen", "failed"), "rgb(255,90,90)"];
+    if (a === "TBC") return [L("noch unsicher", "to be confirmed"), "rgb(240,220,90)"];
+    return [L("Termin offen", "date open"), "#d8eaf2"];
+  }
+  function rakete(x, boden, t, d, fliegt) {
+    c.fillStyle = "rgb(150,158,175)"; c.fillRect(x - 18, boden, 36, 1); c.fillRect(x - 12, boden - 44, 1, 44);
+    let hub = 0, zit = 0;
+    if (fliegt) hub = (t % 4000) * (boden - 20) / 4000; else if (d >= 0 && d <= 600) zit = Math.floor(t / 60) % 2 ? 1 : -1;
+    const y = boden - 4 - hub, rx = x + zit;
+    if (fliegt || (d >= 0 && d < 10)) {
+      const lang = 10 + Math.floor(t / 40) % 6;
+      c.fillStyle = "rgb(255,170,40)"; c.beginPath(); c.moveTo(rx - 4, y); c.lineTo(rx + 4, y); c.lineTo(rx, y + lang); c.fill();
+      c.fillStyle = "rgb(255,240,160)"; c.beginPath(); c.moveTo(rx - 2, y); c.lineTo(rx + 2, y); c.lineTo(rx, y + lang - 4); c.fill();
+      for (let k = 0; k < 5; k++) { const r = 3 + k; c.fillStyle = `rgba(200,205,215,${(150 - k * 25) / 255})`; c.beginPath(); c.arc(rx + (k % 2 ? r : -r) / 2, Math.min(boden, y + lang + k * 5), r, 0, 7); c.fill(); }
+    } else if (d >= 0 && d <= 600) { const q = (t % 1500) / 1500; c.fillStyle = `rgba(220,225,235,${0.47 * (1 - q)})`; c.beginPath(); c.arc(x + 6 + q * 8, boden - 4 - q * 6, 2 + q * 3, 0, 7); c.fill(); }
+    c.fillStyle = "rgb(236,240,246)"; c.beginPath(); c.roundRect(rx - 4, y - 30, 9, 30, 2); c.fill();
+    c.fillStyle = "rgb(230,80,70)"; c.beginPath(); c.moveTo(rx - 4, y - 30); c.lineTo(rx + 5, y - 30); c.lineTo(rx + 0.5, y - 40); c.fill();
+    c.beginPath(); c.moveTo(rx - 4, y - 8); c.lineTo(rx - 4, y); c.lineTo(rx - 9, y); c.fill(); c.beginPath(); c.moveTo(rx + 5, y - 8); c.lineTo(rx + 5, y); c.lineTo(rx + 10, y); c.fill();
+    c.fillStyle = "rgb(90,140,220)"; c.beginPath(); c.arc(rx + 0.5, y - 21, 2, 0, 7); c.fill();
+  }
+  function seiteStarts(ox, t) {
+    text(L("Raketenstarts", "Rocket launches"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
+    const jetzt = Date.now() / 1000, h = starts ? starts.findIndex(x => x.net > jetzt - 3600) : -1;
+    if (h < 0) { passend(starts === null ? L("Hole Startliste ...", "Loading launches ...") : L("Kein Start angekündigt", "No launch scheduled"), ox + W / 2, H / 2, W - 12, "#d8eaf2", 14, false, "center"); return; }
+    const st = starts[h], d = Math.round(st.net - jetzt), a = Math.abs(d), fliegt = gestartet(st) || (d <= 0 && d > -600 && st.status !== "Hold" && st.status !== "TBD");
+    const cd = d >= 86400 ? L(`in ${Math.floor(d / 86400)} T ${Math.floor(d % 86400 / 3600)} h`, `in ${Math.floor(d / 86400)} d ${Math.floor(d % 86400 / 3600)} h`)
+      : d >= 3600 ? `T- ${Math.floor(d / 3600)} h ${String(Math.floor(d % 3600 / 60)).padStart(2, "0")} min` : `T${d >= 0 ? "-" : "+"} ${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
+    const [stText, stFarbe] = statusText(st);
+    const WT = L(["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"], ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
+    const wann = z => { const d2 = new Date(z * 1000), h2 = new Date(); return `${d2.toDateString() === h2.toDateString() ? L("heute", "today") : WT[d2.getDay()]} ${String(d2.getHours()).padStart(2, "0")}:${String(d2.getMinutes()).padStart(2, "0")}`; };
+    rakete(ox + 290, 128, t, d, fliegt);
+    c.font = "700 20px Lato, sans-serif"; const cb = c.measureText(cd).width;
+    text(cd, ox + 8, 46, "rgb(255,214,120)", c.font);
+    passend(stText, ox + 16 + cb, 46, 250 - cb, stFarbe, 12, false, "left");
+    c.font = "700 15px Lato, sans-serif"; const rb = Math.min(170, c.measureText(st.rakete).width);
+    passend(st.rakete, ox + 8, 68, 170, "#fff", 15, true, "left");
+    passend(st.betreiber, ox + 14 + rb, 68, 250 - rb, "#d8eaf2", 12, false, "left");
+    passend(st.bahn ? `${st.mission} · ${st.bahn}` : st.mission, ox + 8, 86, 250, "#fff", 14, false, "left");
+    passend(st.ort, ox + 8, 103, 250, "#d8eaf2", 12, false, "left");
+    passend(L(`Start ${wann(st.net)}`, `Launch ${wann(st.net)}`), ox + 8, 119, 250, "#d8eaf2", 12, false, "left");
+    starts.slice(h + 1, h + 3).forEach((n, z) => passend(`${wann(n.net)} · ${n.rakete}${n.land ? " · " + n.land : ""}`, ox + 8, 142 + z * 15, W - 16, "rgb(150,160,190)", 12, false, "left"));
+  }
   // Mondphase: 0 Neumond, 0.5 Vollmond (wie mondphase() in bilder.cpp)
   const phase = () => (((Date.now() / 1000 - 947182440) / 86400 / 29.530588853) % 1 + 1) % 1;
   function mond(cx, cy, r, p) {
@@ -428,8 +486,8 @@
   }
   function seiteDemnaechst(ox, t) {
     text(L("Demnächst", "Coming soon"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
-    const liste = L(["Raketenstarts", "Seeing & Durchsicht", "Starlink-Ketten", "Meteorströme & Finsternisse", "Die Sonne live (SDO)"],
-                    ["Rocket launches", "Seeing & transparency", "Starlink trains", "Meteor showers & eclipses", "The sun live (SDO)"]);
+    const liste = L(["Seeing & Durchsicht", "Starlink-Ketten", "Meteorströme", "Finsternisse", "Die Sonne live (SDO)"],
+                    ["Seeing & transparency", "Starlink trains", "Meteor showers", "Eclipses", "The sun live (SDO)"]);
     liste.forEach((s, i) => {
       const y = 48 + i * 24, x = ox + 30, an = 0.55 + 0.45 * Math.sin(t * 0.004 + i * 1.3);
       c.strokeStyle = c.fillStyle = `rgba(255,214,120,${an})`; c.lineWidth = 1;
@@ -438,7 +496,7 @@
       passend(s, x + 14, y, W - 50, "#fff", 13, false, "left");
     });
   }
-  const SEITEN = [seiteNacht, seitePlaneten, seiteSatelliten, seiteWeltraum, seiteMond, seiteDemnaechst];
+  const SEITEN = [seiteNacht, seitePlaneten, seiteSatelliten, seiteWeltraum, seiteStarts, seiteMond, seiteDemnaechst];
   function statusLeiste() {
     const z = new Date(), uhr = String(z.getHours()).padStart(2, "0") + ":" + String(z.getMinutes()).padStart(2, "0");
     text(uhr, W - 37, 18, "#fff", "700 15px Lato, sans-serif", "right");
