@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Himmelsstation &ndash; Online-Flasher</title>
+<meta name="theme-color" content="#0d0f13">
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<style>
+  :root{--bg:#0d0f13;--karte:#161a20;--karte2:#1c2129;--rand:#262c35;--rand2:#323a45;--text:#eef1f5;--leise:#8b95a3;--akzent:#8f86ff;--akzent2:#4f6bff;--gut:#3ccf6e;--warn:#f0a030}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       background:radial-gradient(900px 500px at 0% -10%,#1a2440 0%,transparent 60%),radial-gradient(800px 500px at 110% 0%,#2a1a44 0%,transparent 55%),var(--bg);padding:28px 16px}
+  .rahmen{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+  .kopf{display:flex;align-items:center;gap:16px}
+  .kopf h1{margin:0;font-size:28px}
+  .kopf p{margin:2px 0 0;color:var(--leise)}
+  .logo{width:58px;height:58px;border-radius:17px;flex:none;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,var(--akzent),var(--akzent2));box-shadow:0 12px 30px -12px var(--akzent)}
+  .logo svg{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .karte{background:linear-gradient(180deg,var(--karte2),var(--karte));border:1px solid var(--rand);border-radius:20px;padding:22px;box-shadow:0 14px 40px -20px #000}
+  h2{margin:0 0 12px;font-size:17px}
+  ol{margin:0;padding-left:22px;color:var(--leise)} ol li{margin:6px 0} ol b{color:var(--text)}
+  .knopf{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center}
+  esp-web-install-button button[slot=activate]{height:56px;padding:0 34px;border:0;border-radius:16px;color:#fff;font:650 18px system-ui,sans-serif;cursor:pointer;
+       background:linear-gradient(90deg,var(--akzent),var(--akzent2));box-shadow:0 10px 26px -10px var(--akzent)}
+  .wahl{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;text-align:left}
+  @media(max-width:560px){.wahl{grid-template-columns:1fr}}
+  .option{display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:16px;background:#12161c;border:1px solid var(--rand2)}
+  .option .titel{font-weight:700;font-size:17px}
+  .option p{margin:0;color:var(--leise);font-size:14px;flex:1}
+  .option p b{color:var(--text)}
+  .option esp-web-install-button button[slot=activate]{width:100%;height:50px;padding:0 14px;font-size:16px}
+  .option.loeschen{border-color:#5a2a2a;background:#1c1214}
+  .option.loeschen esp-web-install-button button[slot=activate]{background:linear-gradient(90deg,#c2413b,#a8326e);box-shadow:0 10px 26px -12px #ef5350}
+  .chip{display:inline-block;font:600 12px ui-monospace,monospace;padding:4px 10px;border-radius:999px;background:#1e1a3a;color:#c8c2ff;border:1px solid #3c3478}
+  .leise{color:var(--leise);font-size:14px}
+  a{color:var(--akzent)}
+  .merkmale{display:grid;grid-template-columns:1fr 1fr;gap:8px;color:var(--leise);font-size:14px}
+  @media(max-width:520px){.merkmale{grid-template-columns:1fr}}
+  .sim{padding:14px 0 6px}
+  .sim h2{padding:0 22px}
+  .sim iframe{display:block;width:100%;height:560px;border:0;background:transparent}
+</style></head><body>
+<div class="rahmen">
+  <div class="kopf">
+    <div class="logo"><svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/><path d="M17 3l.7 1.6L19.3 5l-1.6.7L17 7.3l-.7-1.6L14.7 5l1.6-.4z"/></svg></div>
+    <div><h1 data-en="Sky Station">Himmelsstation</h1><p data-en="Online flasher &middot; live from the sky and space for the LILYGO T-Display-S3">Online-Flasher &middot; live vom Himmel und aus dem All f&uuml;r das LILYGO T-Display-S3</p></div>
+  </div>
+
+  <div class="karte sim">
+    <h2 data-en="See it in action">So sieht es aus</h2>
+    <iframe id="sim" src="simulation.html?einbetten" title="Simulation der Himmelsstation" loading="lazy"></iframe>
+  </div>
+
+  <div class="karte knopf">
+    <span class="chip">Version __VERSION__</span>
+    <div class="wahl">
+      <div class="option">
+        <div class="titel">&#128260; Update</div>
+        <p data-en="Install new firmware &ndash; <b>saved Wi-Fi networks are kept.</b><br><span style=&quot;color:#f0a030&quot;>&#9888;&#65039; When asked &bdquo;Erase device?&ldquo;, do <b>not</b> tick the box.</span>">Neue Firmware aufspielen &ndash; <b>gespeicherte WLANs bleiben erhalten.</b><br><span style="color:#f0a030">&#9888;&#65039; Bei der Frage &bdquo;Erase device?&ldquo; den Haken <b>nicht</b> setzen.</span></p>
+        <esp-web-install-button manifest="manifest-update.json">
+          <button slot="activate" data-en="&#9889; Install update">&#9889; Update installieren</button>
+          <span slot="unsupported" data-en="<b>Sorry, this browser can&rsquo;t do that.</b><br><span class=&quot;leise&quot;>Please use Chrome or Edge on a PC/Mac.</span>"><b>Dieser Browser kann das leider nicht.</b><br><span class="leise">Bitte Chrome oder Edge am PC/Mac verwenden.</span></span>
+          <span slot="not-allowed" data-en="<b>Only works over https.</b>"><b>Nur &uuml;ber https m&ouml;glich.</b></span>
+        </esp-web-install-button>
+      </div>
+      <div class="option loeschen">
+        <div class="titel" data-en="&#129529; Fresh install">&#129529; Neuinstallation</div>
+        <p data-en="Erase everything and install from scratch &ndash; for <b>new boards</b> or when nothing works anymore. <b>Saved Wi-Fi networks will be gone.</b>">Speicher komplett l&ouml;schen und neu aufspielen &ndash; f&uuml;r <b>neue Boards</b> oder wenn gar nichts mehr geht. <b>Gespeicherte WLANs sind danach weg.</b></p>
+        <esp-web-install-button manifest="manifest-neu.json">
+          <button slot="activate" data-en="&#128465;&#65039; Erase &amp; install">&#128465;&#65039; L&ouml;schen &amp; neu installieren</button>
+          <span slot="unsupported" data-en="<b>Sorry, this browser can&rsquo;t do that.</b>"><b>Dieser Browser kann das leider nicht.</b></span>
+          <span slot="not-allowed" data-en="<b>Only works over https.</b>"><b>Nur &uuml;ber https m&ouml;glich.</b></span>
+        </esp-web-install-button>
+      </div>
+    </div>
+    <span class="leise" data-en="Works with Chrome and Edge on a computer &middot; connect the T-Display-S3 via USB-C.">Funktioniert mit Chrome und Edge am Computer &middot; T-Display-S3 per USB-C anschlie&szlig;en.</span>
+  </div>
+
+  <div class="karte">
+    <h2 data-en="How it works">So geht&rsquo;s</h2>
+    <ol>
+      <li data-en="Connect the T-Display-S3 to your computer via <b>USB-C</b> (a cable with data lines, not a charge-only cable).">T-Display-S3 per <b>USB-C</b> mit dem Computer verbinden (Kabel mit Datenleitungen, kein reines Ladekabel).</li>
+      <li data-en="Click <b>&bdquo;Install update&ldquo;</b> or <b>&bdquo;Erase &amp; install&ldquo;</b> and pick the port (usually &bdquo;USB JTAG/serial debug unit&ldquo;)."><b>&bdquo;Update installieren&ldquo;</b> oder <b>&bdquo;L&ouml;schen &amp; neu installieren&ldquo;</b> klicken und den Anschluss ausw&auml;hlen (meist &bdquo;USB JTAG/serial debug unit&ldquo;).</li>
+      <li data-en="The ESP32-S3 has USB built in &ndash; no driver needed.">Der ESP32-S3 hat USB direkt eingebaut &ndash; ein Treiber ist nicht n&ouml;tig.</li>
+      <li data-en="No connection? Hold the <b>BOOT button</b> (IO0), briefly press <b>RST</b> on the side, release BOOT &ndash; then try again.">Verbindung klappt nicht? Die <b>BOOT-Taste</b> (IO0) gedr&uuml;ckt halten, kurz die <b>RST-Taste</b> an der Seite dr&uuml;cken, BOOT loslassen &ndash; dann nochmal versuchen.</li>
+      <li data-en="After flashing, the display starts. The first time, connect your phone to the Wi-Fi <b>&bdquo;Himmelsstation-Setup&ldquo;</b>, tap your Wi-Fi and enter the password.">Nach dem Aufspielen startet das Display. Beim ersten Mal mit dem Handy ins WLAN <b>&bdquo;Himmelsstation-Setup&ldquo;</b> gehen, dein WLAN antippen und das Passwort eingeben.</li>
+      <li data-en="Then the page asks <b>where the station is</b>: search your town or postcode, or tap the suggestion. Without a choice it finds your location roughly via your internet connection.">Danach fragt die Seite, <b>wo die Himmelsstation steht</b>: Ort oder Postleitzahl suchen oder den Vorschlag antippen. Ohne Auswahl findet sie den Ort ungef&auml;hr &uuml;ber deinen Internetanschluss.</li>
+    </ol>
+  </div>
+
+  <div class="karte">
+    <h2 data-en="What it can do">Was die Himmelsstation kann</h2>
+    <div class="merkmale" data-en="<span>&#127769; Moon phase, how much is lit, next full and new moon</span><span>&#10024; Night sky with twinkling stars</span>
+      <span>&#127748; Morning and evening glow</span><span>&#127769; Night mode</span>
+      <span>&#127756; Coming soon: tonight &ndash; darkness &amp; clouds</span><span>&#129680; Coming soon: planets</span>
+      <span>&#128752;&#65039; Coming soon: ISS &amp; satellites</span><span>&#127752; Coming soon: aurora alert</span>
+      <span>&#128640; Coming soon: rocket launches</span><span>&#128246; Wi-Fi and location set up by phone</span>
+      <span>&#9881;&#65039; Settings at himmelsstation.local</span><span>&#128260; Updates itself from the internet</span>
+      <span>&#127760; Works worldwide &ndash; time follows your location</span><span>&#128241; Landscape or portrait</span>">
+      <span>&#127769; Mondphase, beleuchteter Teil, n&auml;chster Voll- und Neumond</span><span>&#10024; Nachthimmel mit funkelnden Sternen</span>
+      <span>&#127748; Morgen- und Abendrot</span><span>&#127769; Nachtmodus</span>
+      <span>&#127756; Bald: Heute Nacht &ndash; Dunkelheit &amp; Wolken</span><span>&#129680; Bald: Planeten</span>
+      <span>&#128752;&#65039; Bald: ISS &amp; Satelliten</span><span>&#127752; Bald: Polarlicht-Alarm</span>
+      <span>&#128640; Bald: Raketenstarts</span><span>&#128246; WLAN und Ort per Handy einrichten</span>
+      <span>&#9881;&#65039; Einstellungen unter himmelsstation.local</span><span>&#128260; Updates von selbst aus dem Internet</span>
+      <span>&#127760; L&auml;uft weltweit &ndash; Uhrzeit passend zum Ort</span><span>&#128241; Quer oder hochkant aufstellen</span>
+    </div>
+    <p class="leise" style="margin:12px 0 0" data-en="The moon is calculated by the device itself. Time zone, sun and clouds for your location come from <a href=&quot;https://open-meteo.com/&quot;>Open-Meteo</a>. Buttons: <b>IO0</b> = next page (hold 2&nbsp;s = German/English), <b>IO14</b> short = brightness, hold 3&nbsp;s = set up Wi-Fi again.">Den Mond rechnet das Ger&auml;t selbst aus. Zeitzone, Sonne und Wolken f&uuml;r deinen Ort kommen von <a href="https://open-meteo.com/">Open-Meteo</a>. Tasten: <b>IO0</b> = n&auml;chste Seite (2&nbsp;s halten = Deutsch/Englisch), <b>IO14</b> kurz = Helligkeit, 3&nbsp;s halten = WLAN neu einrichten.</p>
+  </div>
+  <p class="leise" style="text-align:center" data-en="LILYGO T-Display-S3 (ESP32-S3, 1.9&Prime;, 320&times;170) &middot; built with PlatformIO &middot; <a href=&quot;https://github.com/ProD-byte/Himmelsstation&quot;>Source code on GitHub</a> (MIT) &middot; Online flasher: <a href=&quot;https://esphome.github.io/esp-web-tools/&quot;>ESP Web Tools</a>">LILYGO T-Display-S3 (ESP32-S3, 1,9&Prime;, 320&times;170) &middot; gebaut mit PlatformIO &middot; <a href="https://github.com/ProD-byte/Himmelsstation">Quellcode auf GitHub</a> &middot; Online-Flasher: <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a></p>
+</div>
+<script>
+/* Englisch fuer alle, deren Browser nicht auf Deutsch steht (oder ?lang=en) */
+(function(){
+  var q = new URLSearchParams(location.search).get('lang');
+  var en = q ? q === 'en' : !/^de/i.test(navigator.language || 'de');
+  if (!en) return;
+  document.documentElement.lang = 'en';
+  document.title = 'Sky Station – Online flasher';
+  document.querySelectorAll('[data-en]').forEach(function(e){ e.innerHTML = e.getAttribute('data-en'); });
+  var sim = document.getElementById('sim'); sim.src = sim.getAttribute('src') + '&en';  // Simulation auch auf Englisch
+})();
+/* Flasher-Einstellungen immer frisch laden (nie aus dem Browser-Zwischenspeicher) */
+document.querySelectorAll('esp-web-install-button').forEach(function(b){ var m=b.getAttribute('manifest').split('?')[0]; b.setAttribute('manifest', m+'?t='+Date.now()); });
+/* Hoehe der Simulation anpassen */
+addEventListener('message', function(e){ if(e.data&&e.data.himmelsstationHoehe){ document.getElementById('sim').style.height=e.data.himmelsstationHoehe+'px'; } });
+</script>
+</body></html>

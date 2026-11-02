@@ -1,0 +1,125 @@
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  .hs{font:15px/1.5 system-ui,sans-serif;color:#eef1f5;display:flex;flex-direction:column;align-items:center;gap:12px;padding:8px 12px 16px}
+  .hs .geraet{background:#14161b;border:1px solid #2a2f38;border-radius:18px;padding:14px 18px 14px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 18px 40px -20px #000}
+  .hs canvas{width:min(640px,78vw);height:auto;aspect-ratio:320/170;border-radius:4px;background:#000;display:block}
+  .hs .tasten{display:flex;flex-direction:column;gap:22px}
+  .hs .tasten button{width:30px;height:30px;border-radius:50%;border:1px solid #3a404c;background:#232833;color:#aab4c8;font:600 11px system-ui;cursor:pointer}
+  .hs .leise{color:#8b95a3;font-size:13px;text-align:center;max-width:640px}
+</style>
+<div class="hs">
+  <div class="geraet">
+    <canvas id="hsLcd" width="640" height="340"></canvas>
+    <div class="tasten"><button id="hsWeiter" title="IO0">IO0</button><button id="hsLicht" title="IO14">IO14</button></div>
+  </div>
+  <p class="leise" id="hsText">Den Mond rechnet die Himmelsstation selbst aus dem Datum aus. Taste IO0 blättert weiter. Planeten, ISS &amp; Satelliten, Polarlicht und Raketenstarts kommen nach und nach dazu.</p>
+</div>
+<script>
+(() => {
+  // Simulation der Himmelsstation (zeichnet wie src/main.cpp): Nachthimmel, Seite "Mond", Seite "Demnaechst"
+  const cv = document.getElementById("hsLcd"), c = cv.getContext("2d");
+  const W = 320, H = 170, en = /[?&]en\b/.test(location.search);
+  const L = (de, e) => en ? e : de;
+  if (en) document.getElementById("hsText").textContent = "The sky station works out the moon from the date by itself. Button IO0 turns the page. Planets, ISS & satellites, aurora and rocket launches are coming step by step.";
+  const sterne = Array.from({ length: 60 }, (_, i) => [(i * 97.3) % W, (i * 53.9) % H, (i * 0.71) % 6.3, i % 7 === 0 ? 1.2 : 0.7]);
+  let seite = 0, alt = 0, wechselStart = -1e9, seiteSeit = 0, licht = 0;
+  const t0 = performance.now();
+
+  function himmel(t) {
+    const g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#060a1c"); g.addColorStop(1, "#16224a");
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+    for (const [x, y, ph, r] of sterne) {
+      c.globalAlpha = 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(t * 0.0017 + ph));
+      c.fillStyle = "#fff"; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+    }
+    c.globalAlpha = 1;
+  }
+  function text(s, x, y, f, font, a = "left") {
+    c.font = font; c.textAlign = a; c.textBaseline = "alphabetic";
+    c.fillStyle = "#000"; c.fillText(s, x + 1, y + 1); c.fillStyle = f; c.fillText(s, x, y);
+  }
+  function passend(s, x, y, platz, f, groesse, fett, a) {
+    let g = groesse;
+    do { c.font = `${fett ? 700 : 400} ${g}px Lato, sans-serif`; g--; } while (c.measureText(s).width > platz && g > 11);
+    text(s, x, y, f, c.font, a);
+  }
+  // Mondphase: 0 Neumond, 0.5 Vollmond (wie mondphase() in bilder.cpp)
+  const phase = () => (((Date.now() / 1000 - 947182440) / 86400 / 29.530588853) % 1 + 1) % 1;
+  function mond(cx, cy, r, p) {
+    c.fillStyle = "#2a3048"; c.beginPath(); c.arc(cx, cy, r, 0, 7); c.fill();
+    const k = Math.cos(2 * Math.PI * p), zu = p < 0.5;
+    c.fillStyle = "#eef0e6";
+    c.beginPath(); c.arc(cx, cy, r, -Math.PI / 2, Math.PI / 2, !zu); c.fill();  // beleuchtete Haelfte
+    c.fillStyle = k > 0 ? "#2a3048" : "#eef0e6";                                  // Sichel: dunkle Ellipse, sonst helle
+    c.beginPath(); c.ellipse(cx, cy, Math.abs(k) * r, r, 0, 0, 7); c.fill();
+    c.fillStyle = "rgba(120,124,110,.25)";
+    for (const [dx, dy, rr] of [[-0.3, -0.25, 0.18], [0.25, 0.2, 0.13], [0.05, -0.45, 0.09]]) { c.beginPath(); c.arc(cx + dx * r, cy + dy * r, rr * r, 0, 7); c.fill(); }
+  }
+  function mondName(p) {
+    if (p < 0.03 || p > 0.97) return L("Neumond", "New moon");
+    if (p < 0.22) return L("Junge Sichel", "Waxing crescent");
+    if (p < 0.28) return L("Erstes Viertel", "First quarter");
+    if (p < 0.47) return L("Zunehmend", "Waxing gibbous");
+    if (p < 0.53) return L("Vollmond", "Full moon");
+    if (p < 0.72) return L("Abnehmend", "Waning gibbous");
+    if (p < 0.78) return L("Letztes Viertel", "Last quarter");
+    return L("Alte Sichel", "Waning crescent");
+  }
+  function seiteMond(ox, t) {
+    text(L("Mond", "Moon"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
+    const p = phase(), cx = ox + 82, cy = 96, r = 50, puls = 0.5 + 0.5 * Math.sin(t * 0.0015);
+    c.fillStyle = `rgba(200,210,255,${0.12 + 0.06 * puls})`; c.beginPath(); c.arc(cx, cy, r + 7 + 2 * puls, 0, 7); c.fill();
+    mond(cx, cy, r, p);
+    const x = ox + 160, platz = W - 168, tage = z => { let d = z - p; if (d <= 0) d += 1; return d * 29.530589; };
+    passend(mondName(p), x, 62, platz, "#fff", 15, true, "left");
+    passend(L(`${Math.round((1 - Math.cos(p * 2 * Math.PI)) / 2 * 100)} % beleuchtet`, `${Math.round((1 - Math.cos(p * 2 * Math.PI)) / 2 * 100)} % lit`), x, 88, platz, "#ffd678", 13, false, "left");
+    const wann = (d, h, m, s) => d < 0.6 || d > 29 ? h : d < 1.6 ? m : s(Math.round(d));
+    passend(wann(tage(0.5), L("Heute Vollmond", "Full moon today"), L("Morgen Vollmond", "Full moon tomorrow"), n => L(`Vollmond in ${n} Tagen`, `Full moon in ${n} days`)), x, 112, platz, "#d8eaf2", 12, false, "left");
+    passend(wann(tage(0), L("Heute Neumond", "New moon today"), L("Morgen Neumond", "New moon tomorrow"), n => L(`Neumond in ${n} Tagen`, `New moon in ${n} days`)), x, 132, platz, "#d8eaf2", 12, false, "left");
+  }
+  function seiteDemnaechst(ox, t) {
+    text(L("Demnächst", "Coming soon"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
+    const liste = L(["Heute Nacht: Dunkelheit & Wolken", "Planeten am Himmel", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts"],
+                    ["Tonight: darkness & clouds", "Planets in the sky", "ISS & satellites", "Aurora alert", "Rocket launches"]);
+    liste.forEach((s, i) => {
+      const y = 48 + i * 24, x = ox + 30, an = 0.55 + 0.45 * Math.sin(t * 0.004 + i * 1.3);
+      c.strokeStyle = c.fillStyle = `rgba(255,214,120,${an})`; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(x - 5, y - 5); c.lineTo(x + 6, y - 5); c.moveTo(x + 0.5, y - 10); c.lineTo(x + 0.5, y + 1); c.stroke();
+      c.beginPath(); c.arc(x + 0.5, y - 5, 2, 0, 7); c.fill();
+      passend(s, x + 14, y, W - 50, "#fff", 13, false, "left");
+    });
+  }
+  const SEITEN = [seiteMond, seiteDemnaechst];
+  function statusLeiste() {
+    const z = new Date(), uhr = String(z.getHours()).padStart(2, "0") + ":" + String(z.getMinutes()).padStart(2, "0");
+    text(uhr, W - 37, 18, "#fff", "700 15px Lato, sans-serif", "right");
+    c.strokeStyle = "#fff"; c.lineWidth = 1; c.strokeRect(W - 30.5, 6.5, 21, 11); c.fillStyle = "#fff"; c.fillRect(W - 9, 10, 2, 4);
+    c.fillStyle = "#ffd63c"; c.beginPath(); c.moveTo(W - 19, 7); c.lineTo(W - 25, 13); c.lineTo(W - 19, 13); c.fill();
+    c.beginPath(); c.moveTo(W - 21, 11); c.lineTo(W - 15, 11); c.lineTo(W - 21, 17); c.fill();
+    SEITEN.forEach((_, i) => { c.fillStyle = i === seite ? "#fff" : "rgba(255,255,255,.35)"; c.beginPath(); c.arc(W / 2 - 5 + i * 10, H - 5, 2, 0, 7); c.fill(); });
+  }
+  function weiter(t) { alt = seite; seite = (seite + 1) % SEITEN.length; wechselStart = t; seiteSeit = t; }
+  function frame() {
+    const t = performance.now() - t0;
+    c.setTransform(2, 0, 0, 2, 0, 0);
+    himmel(t);
+    const p = (t - wechselStart) / 380;
+    if (p < 1) { const weg = (1 - Math.pow(1 - p, 3)) * W; SEITEN[alt](-weg, t); SEITEN[seite](W - weg, t); }
+    else SEITEN[seite](0, t);
+    statusLeiste();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = `rgba(0,0,0,${[0, 0.25, 0.5, 0.75][licht]})`; c.fillRect(0, 0, cv.width, cv.height);
+    if (t - seiteSeit > 12000 && p >= 1) weiter(t);
+    requestAnimationFrame(frame);
+  }
+  document.getElementById("hsWeiter").onclick = () => weiter(performance.now() - t0);
+  document.getElementById("hsLicht").onclick = () => { licht = (licht + 1) % 4; };
+  document.fonts.load("700 15px Lato").finally(() => requestAnimationFrame(frame));
+  // eingebettet (Flasher-Seite): Hoehe an die Seite melden
+  if (/[?&]einbetten\b/.test(location.search) && parent !== window) {
+    const melden = () => parent.postMessage({ himmelsstationHoehe: document.body.scrollHeight + 10 }, "*");
+    addEventListener("load", melden); addEventListener("resize", melden); setTimeout(melden, 500);
+  }
+})();
+</script>
