@@ -13,7 +13,7 @@
     <canvas id="hsLcd" width="640" height="340"></canvas>
     <div class="tasten"><button id="hsWeiter" title="IO0">IO0</button><button id="hsLicht" title="IO14">IO14</button></div>
   </div>
-  <p class="leise" id="hsText">Für Cottbus, mit echten Wolken von Open-Meteo. Dämmerung und Mond rechnet die Himmelsstation selbst aus. Taste IO0 blättert weiter. Planeten, ISS &amp; Satelliten, Polarlicht und Raketenstarts kommen nach und nach dazu.</p>
+  <p class="leise" id="hsText">Für Cottbus, mit echten Wolken von Open-Meteo. Dämmerung, Mond und Planeten rechnet die Himmelsstation selbst aus. Taste IO0 blättert weiter. ISS &amp; Satelliten, Polarlicht und Raketenstarts kommen nach und nach dazu.</p>
 </div>
 <script>
 (() => {
@@ -21,7 +21,7 @@
   const cv = document.getElementById("hsLcd"), c = cv.getContext("2d");
   const W = 320, H = 170, en = /[?&]en\b/.test(location.search);
   const L = (de, e) => en ? e : de;
-  if (en) document.getElementById("hsText").textContent = "For Cottbus, with real clouds from Open-Meteo. The sky station works out twilight and the moon by itself. Button IO0 turns the page. Planets, ISS & satellites, aurora and rocket launches are coming step by step.";
+  if (en) document.getElementById("hsText").textContent = "For Cottbus, with real clouds from Open-Meteo. The sky station works out twilight, moon and planets by itself. Button IO0 turns the page. ISS & satellites, aurora and rocket launches are coming step by step.";
   const sterne = Array.from({ length: 60 }, (_, i) => [(i * 97.3) % W, (i * 53.9) % H, (i * 0.71) % 6.3, i % 7 === 0 ? 1.2 : 0.7]);
   let seite = 0, alt = 0, wechselStart = -1e9, seiteSeit = 0, licht = 0;
   const t0 = performance.now();
@@ -155,6 +155,83 @@
       : n.mond[mitte] > 0 ? L("Mond die ganze Nacht", "Moon up all night") : L("kein Mond in der Nacht", "no moon tonight");
     passend(`${mondA} · ${L(`${Math.round(n.mondLicht * 100)} % beleuchtet`, `${Math.round(n.mondLicht * 100)} % lit`)}`, ox + W / 2, 156, W - 12, "#ffecaa", 12, false, "center");
   }
+  // ---------- Planeten (wie planetOrt in astro.cpp und seitePlaneten in main.cpp) ----------
+  const BAHN = [
+    [[0.38709927, 0.00000037], [0.20563593, 0.00001906], [7.00497902, -0.00594749], [252.25032350, 149472.67411175], [77.45779628, 0.16047689], [48.33076593, -0.12534081]],
+    [[0.72333566, 0.00000390], [0.00677672, -0.00004107], [3.39467605, -0.00078890], [181.97909950, 58517.81538729], [131.60246718, 0.00268329], [76.67984255, -0.27769418]],
+    [[1.52371034, 0.00001847], [0.09339410, 0.00007882], [1.84969142, -0.00813131], [-4.55343205, 19140.30268499], [-23.94362959, 0.44441088], [49.55953891, -0.29257343]],
+    [[5.20288700, -0.00011607], [0.04838624, -0.00013253], [1.30439695, -0.00183714], [34.39644051, 3034.74612775], [14.72847983, 0.21252668], [100.47390909, 0.20469106]],
+    [[9.53667594, -0.00125060], [0.05386179, -0.00050991], [2.48599187, 0.00193609], [49.95424423, 1222.49362201], [92.59887831, -0.41897216], [113.66242448, -0.28867794]],
+    [[1.00000261, 0.00000562], [0.01671123, -0.00004392], [-0.00001531, -0.01294668], [100.46457166, 35999.37244981], [102.93768193, 0.32327364], [0, 0]]];
+  const PNAME = () => L(["Merkur", "Venus", "Mars", "Jupiter", "Saturn"], ["Mercury", "Venus", "Mars", "Jupiter", "Saturn"]);
+  const PFARBE = ["rgb(205,195,185)", "rgb(255,246,214)", "rgb(255,128,88)", "rgb(242,216,172)", "rgb(234,204,128)"];
+  function helio(k, T) {
+    const el = BAHN[k].map(([v, d]) => v + d * T), [a, e] = el, I = el[2] * RAD, w = (el[4] - el[5]) * RAD, O = el[5] * RAD, M = ((el[3] - el[4]) % 360) * RAD;
+    let E = M + e * Math.sin(M); for (let n = 0; n < 6; n++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+    const xp = a * (Math.cos(E) - e), yp = a * Math.sqrt(1 - e * e) * Math.sin(E);
+    return [(Math.cos(w) * Math.cos(O) - Math.sin(w) * Math.sin(O) * Math.cos(I)) * xp + (-Math.sin(w) * Math.cos(O) - Math.cos(w) * Math.sin(O) * Math.cos(I)) * yp,
+            (Math.cos(w) * Math.sin(O) + Math.sin(w) * Math.cos(O) * Math.cos(I)) * xp + (-Math.sin(w) * Math.sin(O) + Math.cos(w) * Math.cos(O) * Math.cos(I)) * yp,
+            Math.sin(w) * Math.sin(I) * xp + Math.cos(w) * Math.sin(I) * yp];
+  }
+  function planetOrt(i, t) {
+    const d = t / 86400 - 10957.5, T = d / 36525, [px, py, pz] = helio(i, T), [ex, ey, ez] = helio(5, T);
+    const gx = px - ex, gy = py - ey, gz = pz - ez, p = 1.39697 * T * RAD, gx2 = gx * Math.cos(p) - gy * Math.sin(p), gy2 = gx * Math.sin(p) + gy * Math.cos(p);
+    const eps = 23.43928 * RAD, xq = gx2, yq = gy2 * Math.cos(eps) - gz * Math.sin(eps), zq = gy2 * Math.sin(eps) + gz * Math.cos(eps);
+    const ra = Math.atan2(yq, xq), dec = Math.atan2(zq, Math.hypot(xq, yq)), H = (280.46061837 + 360.98564736629 * d + LON) * RAD - ra;
+    const h = Math.asin(Math.sin(LAT * RAD) * Math.sin(dec) + Math.cos(LAT * RAD) * Math.cos(dec) * Math.cos(H)) / RAD;
+    const az = ((Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(LAT * RAD) - Math.tan(dec) * Math.cos(LAT * RAD)) / RAD + 540) % 360);
+    const r = Math.hypot(px, py, pz), g = Math.hypot(gx, gy, gz), re = Math.hypot(ex, ey, ez), w = Math.acos(Math.max(-1, Math.min(1, (r * r + g * g - re * re) / (2 * r * g)))) / RAD, l = 5 * Math.log10(r * g);
+    const mag = [-0.613 + w * (6.3280e-2 + w * (-1.6336e-3 + w * (3.3644e-5 + w * (-3.4265e-7 + w * (1.6893e-9 - w * 3.0334e-12))))),
+      -4.384 + w * (-1.044e-3 + w * (3.687e-4 + w * (-2.814e-6 + w * 8.938e-9))), -1.601 + w * (2.267e-2 - w * 1.302e-4),
+      -9.395 + w * (-3.7e-4 + w * 6.16e-4), -8.88 + 0.044 * w][i] + l;
+    return { az, h, mag };
+  }
+  function planetenNacht(n) {
+    return [0, 1, 2, 3, 4].map(k => {
+      const pl = { sichtbar: false, hoehe: -90 };
+      n.sonne.forEach((s, i) => {
+        if (s >= -6) return;
+        const t = n.mittag + i * 600, o = planetOrt(k, t);
+        if (o.h < 8) return;
+        if (!pl.sichtbar) { pl.ab = t; pl.sichtbar = true; }
+        pl.bis = t;
+        if (o.h > pl.hoehe) Object.assign(pl, { hoehe: o.h, az: o.az, mag: o.mag });
+      });
+      return pl;
+    });
+  }
+  const richtung = az => L(["N", "NO", "O", "SO", "S", "SW", "W", "NW"], ["N", "NE", "E", "SE", "S", "SW", "W", "NW"])[Math.round((((az % 360) + 360) % 360) / 45) % 8];
+  function seitePlaneten(ox, t) {
+    text(L("Planeten heute Nacht", "Planets tonight"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
+    const jetzt = Date.now() / 1000;
+    if (!nacht || jetzt - nachtZeit > 600) { nacht = nachtRechnen(jetzt); nachtZeit = jetzt; }
+    if (!nacht.planet) nacht.planet = planetenNacht(nacht);
+    const hor = 96, hoehe = 62, cx = ox + W / 2, halb = 148;
+    const px = az => cx + Math.max(-135, Math.min(135, az - 180)) / 135 * halb, py = h => hor - Math.sqrt(Math.max(0, Math.min(90, h)) / 90) * hoehe;
+    c.fillStyle = "rgba(170,180,205,.5)"; c.fillRect(cx - halb - 4, hor, 2 * halb + 8, 1);
+    c.font = "400 11px Lato, sans-serif";
+    for (let k = 1; k < 8; k++) text(richtung(k * 45), px(k * 45), hor + 12, "rgb(150,160,190)", c.font, "center");
+    const sicht = nacht.planet.map((p, i) => [p, i]).filter(([p]) => p.sichtbar);
+    if (!sicht.length) { passend(L("Heute Nacht ist kein Planet gut zu sehen", "No planet is well placed tonight"), ox + W / 2, hor - 24, W - 12, "#d8eaf2", 14, false, "center"); return; }
+    const belegt = [], frei = (a, b, c2, d) => belegt.every(([x0, y0, x1, y1]) => !(a < x1 && c2 > x0 && b < y1 && d > y0));
+    sicht.forEach(([p, i]) => {
+      const x = px(p.az), y = py(p.hoehe), r = Math.max(2.5, Math.min(6.5, 4.5 - p.mag * 0.7)), puls = 0.5 + 0.5 * Math.sin(t * 0.003 + i * 1.7);
+      c.globalAlpha = (50 + 30 * puls) / 255; c.fillStyle = PFARBE[i]; c.beginPath(); c.arc(x, y, r + 4 + puls * 2, 0, 7); c.fill(); c.globalAlpha = 1;
+      c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+      if (i === 4) { c.strokeStyle = PFARBE[i]; c.lineWidth = 1; c.beginPath(); c.ellipse(x, y, r + 4, 2, 0, 0, 7); c.stroke(); }
+      c.font = "400 11px Lato, sans-serif"; const bw = c.measureText(PNAME()[i]).width / 2 + 2;
+      for (const [tx, ty] of [[x, y - r - 6], [x, y + r + 14], [x + r + 6 + bw, y + 4], [x - r - 6 - bw, y + 4]]) {
+        if (tx - bw < ox || tx + bw > ox + W || !frei(tx - bw, ty - 11, tx + bw, ty + 2)) continue;
+        text(PNAME()[i], tx, ty, "#fff", c.font, "center"); belegt.push([tx - bw, ty - 11, tx + bw, ty + 2]); break;
+      }
+    });
+    sicht.slice(0, 4).forEach(([p, i], z) => {
+      const y = 121 + z * 13, mag = (p.mag >= 0 ? "+" : "") + p.mag.toFixed(1).replace(".", en ? "." : ",");
+      c.fillStyle = PFARBE[i]; c.beginPath(); c.arc(ox + 14, y - 4, 3, 0, 7); c.fill();
+      passend(L(`${PNAME()[i]}  ${uhr(p.ab)} – ${uhr(p.bis)} · ${Math.round(p.hoehe)}° im ${richtung(p.az)} · ${mag} mag`,
+                `${PNAME()[i]}  ${uhr(p.ab)} – ${uhr(p.bis)} · ${Math.round(p.hoehe)}° ${richtung(p.az)} · ${mag} mag`), ox + 22, y, W - 30, "#fff", 12, false, "left");
+    });
+  }
   // Mondphase: 0 Neumond, 0.5 Vollmond (wie mondphase() in bilder.cpp)
   const phase = () => (((Date.now() / 1000 - 947182440) / 86400 / 29.530588853) % 1 + 1) % 1;
   function mond(cx, cy, r, p) {
@@ -191,8 +268,8 @@
   }
   function seiteDemnaechst(ox, t) {
     text(L("Demnächst", "Coming soon"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
-    const liste = L(["Seeing & Durchsicht", "Planeten am Himmel", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts"],
-                    ["Seeing & transparency", "Planets in the sky", "ISS & satellites", "Aurora alert", "Rocket launches"]);
+    const liste = L(["Seeing & Durchsicht", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts", "Meteorströme & Finsternisse"],
+                    ["Seeing & transparency", "ISS & satellites", "Aurora alert", "Rocket launches", "Meteor showers & eclipses"]);
     liste.forEach((s, i) => {
       const y = 48 + i * 24, x = ox + 30, an = 0.55 + 0.45 * Math.sin(t * 0.004 + i * 1.3);
       c.strokeStyle = c.fillStyle = `rgba(255,214,120,${an})`; c.lineWidth = 1;
@@ -201,7 +278,7 @@
       passend(s, x + 14, y, W - 50, "#fff", 13, false, "left");
     });
   }
-  const SEITEN = [seiteNacht, seiteMond, seiteDemnaechst];
+  const SEITEN = [seiteNacht, seitePlaneten, seiteMond, seiteDemnaechst];
   function statusLeiste() {
     const z = new Date(), uhr = String(z.getHours()).padStart(2, "0") + ":" + String(z.getMinutes()).padStart(2, "0");
     text(uhr, W - 37, 18, "#fff", "700 15px Lato, sans-serif", "right");

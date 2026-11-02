@@ -2,7 +2,7 @@
 // Standort: am Handy gewaehlt (Einrichtung), sonst grob ueber die Internet-Adresse, sonst Cottbus
 //   Taster GPIO 0:  kurz = naechste Seite, 2 s halten = Sprache Deutsch/Englisch (zeigt auch Adresse + Build)
 //   Taster GPIO 14: kurz = Helligkeit, 3 s halten = WLAN und Ort neu einrichten
-// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Mond, Demnaechst - weitere folgen
+// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Planeten, Mond, Demnaechst - weitere folgen
 // Zeitzone, Sonne und Wolken: open-meteo.com
 // WLAN: Einrichtung per Handy ueber das WLAN "Himmelsstation-Setup" (siehe wlan.cpp)
 // Einstellungen: http://himmelsstation.local (siehe web.cpp)
@@ -298,7 +298,95 @@ void seiteNacht(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 2: Mond (rechnet das Geraet selbst aus dem Datum)
+// Seite 2: Planeten - welche heute Nacht zu sehen sind, wo am hoechsten und wie hell
+// ------------------------------------------------------------
+const char *richtung(float az) {
+  static const char *DE[] = {"N", "NO", "O", "SO", "S", "SW", "W", "NW"};
+  static const char *EN[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+  int i = (int)lroundf(fmodf(az + 360, 360) / 45) % 8;
+  return TX(DE[i], EN[i]);
+}
+
+static uint16_t planetFarbe(int i) {
+  static const uint8_t F[PLANETEN][3] = {{205, 195, 185}, {255, 246, 214}, {255, 128, 88}, {242, 216, 172}, {234, 204, 128}};
+  return farbe(F[i][0], F[i][1], F[i][2]);
+}
+
+void seitePlaneten(int ox, uint32_t t) {
+  titel(ox, TX("Planeten heute Nacht", "Planets tonight"), t);
+  const Nacht &n = himmel.nacht;
+  const bool hk = hoch();
+  // Himmel von Sueden gesehen: links Osten, rechts Westen (Azimut 45 bis 315 Grad), Hoehe mit Wurzel
+  const int hor = hk ? 190 : 96, hoehe = hk ? 112 : 62, cx = ox + B / 2, halb = hk ? 74 : 148;
+  auto px = [&](float az) { return cx + (int)(constrain(az - 180, -135.0f, 135.0f) / 135 * halb); };
+  auto py = [&](float h) { return hor - (int)(sqrtf(constrain(h, 0.0f, 90.0f) / 90) * hoehe); };
+  bild.drawFastHLine(cx - halb - 4, hor, 2 * halb + 8, bild.alphaBlend(130, farbe(170, 180, 205), hintergrund(cx, hor)));
+  schrift(bild, S_K);
+  for (int k = 1; k < 8; k++) {
+    if (hk && k % 2) continue;  // hochkant nur O, S, W
+    int x = px(k * 45);
+    schreibe(bild, richtung(k * 45), x, hor + 12, farbe(150, 160, 190), MITTE);
+  }
+
+  int anzahl = 0;
+  for (int i = 0; i < PLANETEN; i++) anzahl += n.gueltig && n.planet[i].sichtbar;
+  if (!anzahl) {
+    passend(TX("Heute Nacht ist kein", "No planet is well placed"), ox + B / 2, hor - 34, B - 12, HELL, S_M, MITTE);
+    passend(TX("Planet gut zu sehen", "tonight"), ox + B / 2, hor - 14, B - 12, HELL, S_M, MITTE);
+    return;
+  }
+
+  // Planeten an ihrem hoechsten Punkt der Nacht: Groesse nach Helligkeit, leichtes Funkeln.
+  // Namen ueber den Punkt - stoesst er an einen schon geschriebenen, darunter, sonst weglassen (steht ja in der Liste)
+  int belegt[PLANETEN][4], nBelegt = 0;
+  auto frei = [&](int x0, int y0, int x1, int y1) {
+    for (int k = 0; k < nBelegt; k++)
+      if (x0 < belegt[k][2] && x1 > belegt[k][0] && y0 < belegt[k][3] && y1 > belegt[k][1]) return false;
+    return true;
+  };
+  for (int i = 0; i < PLANETEN; i++) {
+    const Planet &p = n.planet[i];
+    if (!p.sichtbar) continue;
+    int x = px(p.az), y = py(p.hoehe);
+    float r = constrain(4.5f - p.mag * 0.7f, 2.5f, 6.5f);
+    float puls = 0.5f + 0.5f * sinf(t * 0.003f + i * 1.7f);
+    bild.fillSmoothCircle(x, y, r + 4 + puls * 2, bild.alphaBlend(50 + 30 * puls, planetFarbe(i), hintergrund(x, y - 12)));
+    bild.fillSmoothCircle(x, y, r, planetFarbe(i));
+    if (i == 4) bild.drawEllipse(x, y, r + 4, 2, planetFarbe(i));  // Saturn mit Ring
+    // Platz fuer den Namen: ueber, unter, rechts oder links vom Punkt
+    int w = breite(bild, planetName(i)) / 2 + 2, ri = (int)r;
+    const int platz[4][2] = {{x, y - ri - 6}, {x, y + ri + 14}, {x + ri + 6 + w, y + 4}, {x - ri - 6 - w, y + 4}};
+    for (auto &p : platz) {
+      int tx = p[0], ty = p[1];
+      if (tx - w < ox || tx + w > ox + B || !frei(tx - w, ty - 11, tx + w, ty + 2)) continue;
+      schreibe(bild, planetName(i), tx, ty, WEISS, MITTE);
+      belegt[nBelegt][0] = tx - w, belegt[nBelegt][1] = ty - 11, belegt[nBelegt][2] = tx + w, belegt[nBelegt][3] = ty + 2, nBelegt++;
+      break;
+    }
+  }
+
+  // Liste: Name, wann zu sehen, wo am hoechsten, Helligkeit
+  int zeile = 0;
+  for (int i = 0; i < PLANETEN && zeile < (hk ? 5 : 4); i++) {
+    const Planet &p = n.planet[i];
+    if (!p.sichtbar) continue;
+    char a[8], b[8], z[64], mag[12];
+    uhrzeit(a, sizeof(a), p.ab);
+    uhrzeit(b, sizeof(b), p.bis);
+    snprintf(mag, sizeof(mag), "%+.1f", p.mag);
+    if (!einst.sprache) for (char *c = mag; *c; c++) if (*c == '.') *c = ',';
+    int y = hk ? 226 + zeile * 18 : 121 + zeile * 13;
+    bild.fillSmoothCircle(ox + (hk ? 12 : 14), y - 4, 3, planetFarbe(i));
+    if (hk) snprintf(z, sizeof(z), "%s %s – %s", planetName(i), a, b);
+    else snprintf(z, sizeof(z), TX("%s  %s – %s · %d° im %s · %s mag", "%s  %s – %s · %d° %s · %s mag"), planetName(i), a, b,
+                  (int)lroundf(p.hoehe), richtung(p.az), mag);
+    passend(z, ox + (hk ? 20 : 22), y, B - (hk ? 26 : 30), WEISS, S_K, LINKS);
+    zeile++;
+  }
+}
+
+// ------------------------------------------------------------
+// Seite 3: Mond (rechnet das Geraet selbst aus dem Datum)
 // ------------------------------------------------------------
 void seiteMond(int ox, uint32_t t) {
   titel(ox, TX("Mond", "Moon"), t);
@@ -330,12 +418,12 @@ void seiteMond(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 3: Demnaechst - was die Himmelsstation bald kann
+// Seite 4: Demnaechst - was die Himmelsstation bald kann
 // ------------------------------------------------------------
 void seiteDemnaechst(int ox, uint32_t t) {
   titel(ox, TX("Demnächst", "Coming soon"), t);
-  static const char *DE[] = {"Seeing & Durchsicht", "Planeten am Himmel", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts"};
-  static const char *EN[] = {"Seeing & transparency", "Planets in the sky", "ISS & satellites", "Aurora alert", "Rocket launches"};
+  static const char *DE[] = {"Seeing & Durchsicht", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts", "Meteorströme & Finsternisse"};
+  static const char *EN[] = {"Seeing & transparency", "ISS & satellites", "Aurora alert", "Rocket launches", "Meteor showers & eclipses"};
   const bool hk = hoch();
   const int y0 = hk ? HOCH_TOP + 30 : 48, dy = hk ? 40 : 24, x = ox + (hk ? 26 : 30);
   for (int i = 0; i < 5; i++) {
@@ -354,8 +442,9 @@ void zeichneSeite(int s, int ox, uint32_t t) {
   if (ox <= -B || ox >= B) return;
   switch (s) {
     case 0: seiteNacht(ox, t); break;
-    case 1: seiteMond(ox, t); break;
-    case 2: seiteDemnaechst(ox, t); break;
+    case 1: seitePlaneten(ox, t); break;
+    case 2: seiteMond(ox, t); break;
+    case 3: seiteDemnaechst(ox, t); break;
   }
 }
 

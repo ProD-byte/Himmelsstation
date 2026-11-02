@@ -5,7 +5,7 @@
 
 #include <Arduino.h>
 
-const int SEITEN_ANZAHL = 3;  // Heute Nacht, Mond, Demnaechst (weitere Seiten kommen dazu)
+const int SEITEN_ANZAHL = 4;  // Heute Nacht, Planeten, Mond, Demnaechst (weitere Seiten kommen dazu)
 
 struct Einstellungen {
   uint8_t licht = 0;          // Helligkeitsstufe am Tag (0 = hellste)
