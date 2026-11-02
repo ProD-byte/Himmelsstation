@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap" rel="stylesheet">
 <style>
   .hs{font:15px/1.5 system-ui,sans-serif;color:#eef1f5;display:flex;flex-direction:column;align-items:center;gap:12px;padding:8px 12px 16px}
@@ -12,7 +13,7 @@
     <canvas id="hsLcd" width="640" height="340"></canvas>
     <div class="tasten"><button id="hsWeiter" title="IO0">IO0</button><button id="hsLicht" title="IO14">IO14</button></div>
   </div>
-  <p class="leise" id="hsText">Den Mond rechnet die Himmelsstation selbst aus dem Datum aus. Taste IO0 blättert weiter. Planeten, ISS &amp; Satelliten, Polarlicht und Raketenstarts kommen nach und nach dazu.</p>
+  <p class="leise" id="hsText">Für Cottbus, mit echten Wolken von Open-Meteo. Dämmerung und Mond rechnet die Himmelsstation selbst aus. Taste IO0 blättert weiter. Planeten, ISS &amp; Satelliten, Polarlicht und Raketenstarts kommen nach und nach dazu.</p>
 </div>
 <script>
 (() => {
@@ -20,7 +21,7 @@
   const cv = document.getElementById("hsLcd"), c = cv.getContext("2d");
   const W = 320, H = 170, en = /[?&]en\b/.test(location.search);
   const L = (de, e) => en ? e : de;
-  if (en) document.getElementById("hsText").textContent = "The sky station works out the moon from the date by itself. Button IO0 turns the page. Planets, ISS & satellites, aurora and rocket launches are coming step by step.";
+  if (en) document.getElementById("hsText").textContent = "For Cottbus, with real clouds from Open-Meteo. The sky station works out twilight and the moon by itself. Button IO0 turns the page. Planets, ISS & satellites, aurora and rocket launches are coming step by step.";
   const sterne = Array.from({ length: 60 }, (_, i) => [(i * 97.3) % W, (i * 53.9) % H, (i * 0.71) % 6.3, i % 7 === 0 ? 1.2 : 0.7]);
   let seite = 0, alt = 0, wechselStart = -1e9, seiteSeit = 0, licht = 0;
   const t0 = performance.now();
@@ -43,6 +44,116 @@
     let g = groesse;
     do { c.font = `${fett ? 700 : 400} ${g}px Lato, sans-serif`; g--; } while (c.measureText(s).width > platz && g > 11);
     text(s, x, y, f, c.font, a);
+  }
+  // ---------- Heute Nacht (wie astro.cpp und seiteNacht in main.cpp) ----------
+  const LAT = 51.7563, LON = 14.3329, RAD = Math.PI / 180;
+  let abw = 3600, wolkenAb = 0, wolken = [];  // Zeitzone und Wolken je Stunde (live von Open-Meteo, sonst Beispiel)
+  const hoeheAus = (ra, dec, d) => Math.asin(Math.sin(LAT * RAD) * Math.sin(dec) + Math.cos(LAT * RAD) * Math.cos(dec) * Math.cos((280.46061837 + 360.98564736629 * d + LON) * RAD - ra)) / RAD;
+  function sonneH(t) {
+    const d = t / 86400 - 10957.5, g = (357.529 + 0.98560028 * d) * RAD, q = 280.459 + 0.98564736 * d;
+    const l = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * RAD, e = (23.439 - 0.00000036 * d) * RAD;
+    return hoeheAus(Math.atan2(Math.cos(e) * Math.sin(l), Math.cos(l)), Math.asin(Math.sin(e) * Math.sin(l)), d);
+  }
+  function mondH(t) {
+    const d = t / 86400 - 10957.5, T = d / 36525, sn = (a, b) => Math.sin((a + b * T) * RAD), cs = (a, b) => Math.cos((a + b * T) * RAD);
+    const lam = (218.32 + 481267.881 * T + 6.29 * sn(134.9, 477198.85) - 1.27 * sn(259.2, -413335.38) + 0.66 * sn(235.7, 890534.23) + 0.21 * sn(269.9, 954397.70) - 0.19 * sn(357.5, 35999.05) - 0.11 * sn(186.6, 966404.05)) * RAD;
+    const bet = (5.13 * sn(93.3, 483202.03) + 0.28 * sn(228.2, 960400.87) - 0.28 * sn(318.3, 6003.18) - 0.17 * sn(217.6, -407332.20)) * RAD;
+    const hp = 0.9508 + 0.0518 * cs(134.9, 477198.85) + 0.0095 * cs(259.2, -413335.38) + 0.0078 * cs(235.7, 890534.23) + 0.0028 * cs(269.9, 954397.70);
+    const e = 23.439 * RAD, x = Math.cos(bet) * Math.cos(lam), y = Math.cos(e) * Math.cos(bet) * Math.sin(lam) - Math.sin(e) * Math.sin(bet), z = Math.sin(e) * Math.cos(bet) * Math.sin(lam) + Math.cos(e) * Math.sin(bet);
+    const h = hoeheAus(Math.atan2(y, x), Math.asin(z), d);
+    return h - hp * Math.cos(h * RAD);
+  }
+  function genau(f, sw, t0) { let lo = t0, hi = t0 + 600; const u = f(lo) < sw; while (hi - lo > 5) { const m = (lo + hi) / 2; if ((f(m) < sw) === u) lo = m; else hi = m; } return (lo + hi) / 2; }
+  let nacht = null, nachtZeit = 0;
+  function nachtRechnen(jetzt) {
+    const n = { mittag: Math.floor((jetzt + abw - 8 * 3600) / 86400) * 86400 + 12 * 3600 - abw, sonne: [], mond: [] };
+    const SW = [-0.833, -6, -12, -18], RUNTER = ["unter", "buergEnde", "nautEnde", "astroEnde"], HOCH = ["auf", "buergAnf", "nautAnf", "astroAnf"];
+    let s0 = 0, m0 = 0;
+    for (let i = 0; i < 145; i++) {
+      const t = n.mittag + i * 600, sh = sonneH(t), mh = mondH(t);
+      n.sonne.push(sh); n.mond.push(mh);
+      if (i) {
+        SW.forEach((sw, k) => {
+          if (s0 >= sw && sh < sw && !n[RUNTER[k]]) n[RUNTER[k]] = genau(sonneH, sw, t - 600);
+          if (s0 < sw && sh >= sw && !n[HOCH[k]]) n[HOCH[k]] = genau(sonneH, sw, t - 600);
+        });
+        if (m0 < -0.833 && mh >= -0.833 && !n.mondAuf) n.mondAuf = genau(mondH, -0.833, t - 600);
+        if (m0 >= -0.833 && mh < -0.833 && !n.mondUnter) n.mondUnter = genau(mondH, -0.833, t - 600);
+      }
+      s0 = sh; m0 = mh;
+    }
+    n.dunkelArt = 0;
+    if (n.astroEnde && n.astroAnf > n.astroEnde) [n.dunkelVon, n.dunkelBis, n.dunkelArt] = [n.astroEnde, n.astroAnf, 3];
+    else if (n.nautEnde && n.nautAnf > n.nautEnde) [n.dunkelVon, n.dunkelBis, n.dunkelArt] = [n.nautEnde, n.nautAnf, 2];
+    else if (n.buergEnde && n.buergAnf > n.buergEnde) [n.dunkelVon, n.dunkelBis, n.dunkelArt] = [n.buergEnde, n.buergAnf, 1];
+    n.dunkelMin = n.dunkelArt ? (n.dunkelBis - n.dunkelVon) / 60 : 0; n.ohneMondMin = 0;
+    for (let t = n.dunkelVon; n.dunkelArt && t < n.dunkelBis; t += 300) if (mondH(t) < -0.833) n.ohneMondMin += 5;
+    n.ohneMondMin = Math.min(n.ohneMondMin, n.dunkelMin);
+    const p = ((((n.mittag + 43200 - 947182440) / 86400 / 29.530588853) % 1) + 1) % 1;
+    n.mondLicht = (1 - Math.cos(p * 2 * Math.PI)) / 2;
+    return n;
+  }
+  function wolkenZwischen(von, bis) {
+    if (!wolkenAb) return -1; let sum = 0, k = 0;
+    wolken.forEach((w, i) => { const t = wolkenAb + i * 3600; if (t + 3600 > von && t < bis && w >= 0) { sum += w; k++; } });
+    return k ? sum / k : -1;
+  }
+  fetch(`https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=cloud_cover&timezone=auto&past_days=1&forecast_days=2`)
+    .then(r => r.json()).then(j => {
+      abw = j.utc_offset_seconds;
+      const z = j.hourly.time[0];
+      wolkenAb = Date.UTC(+z.slice(0, 4), +z.slice(5, 7) - 1, +z.slice(8, 10), +z.slice(11, 13)) / 1000 - abw;
+      wolken = j.hourly.cloud_cover.map(w => w ?? -1); nachtZeit = 0;
+    }).catch(() => { const jetzt = Date.now() / 1000; wolkenAb = Math.floor(jetzt / 3600) * 3600 - 36 * 3600; wolken = Array.from({ length: 72 }, (_, i) => Math.round(50 + 45 * Math.sin(i / 5))); });
+  const uhr = t => { if (!t) return "--:--"; const d = new Date((t + abw) * 1000); return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0"); };
+  const daemmerFarbe = s => s >= -0.833 ? [96, 150, 220] : s >= -6 ? [62, 98, 170] : s >= -12 ? [36, 58, 120] : s >= -18 ? [20, 30, 74] : [6, 8, 22];
+  function seiteNacht(ox, t) {
+    text(L("Heute Nacht", "Tonight"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
+    const jetzt = Date.now() / 1000;
+    if (!nacht || jetzt - nachtZeit > 600) { nacht = nachtRechnen(jetzt); nachtZeit = jetzt; }
+    const n = nacht;
+    const wk = wolkenZwischen(n.dunkelVon, n.dunkelBis), anteil = n.dunkelMin ? 1 - n.ohneMondMin / n.dunkelMin : 0, stoert = anteil * n.mondLicht;
+    let wert = (wk < 0 ? 1 : 1 - wk / 100) * (1 - 0.7 * stoert); if (n.dunkelArt < 2) wert *= 0.5;
+    const [note, nf] = wert >= 0.75 ? [L("Sehr gut", "Very good"), "#6ee682"] : wert >= 0.5 ? [L("Gut", "Good"), "#bee66e"] : wert >= 0.25 ? [L("Mäßig", "Fair"), "#ffc850"] : [L("Schlecht", "Poor"), "#ff6e64"];
+    const gw = wk < 0 ? L("ohne Wolkendaten", "no cloud data") : wk < 20 ? L("klar", "clear") : wk < 50 ? L("teils bewölkt", "partly cloudy") : wk < 80 ? L("meist bewölkt", "mostly cloudy") : L("bedeckt", "overcast");
+    const gm = !n.dunkelArt ? L("nicht richtig dunkel", "never really dark") : stoert < 0.1 ? L("kein Mondlicht", "no moonlight") : stoert < 0.45 ? L("etwas Mondlicht", "some moonlight") : L("viel Mondlicht", "bright moon");
+    const grund = `${gw} · ${gm}`;
+    const dunkel = n.dunkelArt === 3 ? L(`dunkel ${uhr(n.dunkelVon)} – ${uhr(n.dunkelBis)}`, `dark ${uhr(n.dunkelVon)} – ${uhr(n.dunkelBis)}`)
+      : n.dunkelArt === 2 ? L(`halbdunkel ${uhr(n.dunkelVon)} – ${uhr(n.dunkelBis)}`, `twilight ${uhr(n.dunkelVon)} – ${uhr(n.dunkelBis)}`) : L("keine echte Nacht", "no real night");
+    const om = `${Math.floor(n.ohneMondMin / 60)}:${String(n.ohneMondMin % 60).padStart(2, "0")} h`, ohneMond = L(`${om} mondfrei`, `${om} moonless`);
+    const von = n.unter ? n.unter - 3600 : n.mittag + 4 * 3600, bis = n.auf ? n.auf + 3600 : n.mittag + 20 * 3600;
+    const lx = ox + 10, lb = W - 20, ly = 82, lh = 20, xVon = z => lx + (z - von) * lb / (bis - von);
+    for (let x = 0; x < lb; x++) {
+      const z = von + x * (bis - von) / lb, i = (z - n.mittag) / 600, k = Math.max(0, Math.min(143, Math.floor(i))), f = Math.max(0, Math.min(1, i - k));
+      const sh = n.sonne[k] + (n.sonne[k + 1] - n.sonne[k]) * f, mh = n.mond[k] + (n.mond[k + 1] - n.mond[k]) * f;
+      let [r, g, b] = daemmerFarbe(sh);
+      const w = wolkenAb ? Math.floor((z - wolkenAb) / 3600) : -1;
+      if (w >= 0 && w < wolken.length && wolken[w] > 0) { const a = wolken[w] * 0.0067; r += (120 - r) * a; g += (126 - g) * a; b += (140 - b) * a; }
+      c.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`; c.fillRect(lx + x, ly, 1, lh);
+      if (mh > -0.833) { c.fillStyle = `rgba(255,236,170,${0.3 + 0.7 * n.mondLicht})`; c.fillRect(lx + x, ly - 5, 1, 1); }
+    }
+    c.strokeStyle = "rgba(255,255,255,.45)"; c.lineWidth = 1; c.strokeRect(lx - 0.5, ly - 0.5, lb + 1, lh + 1);
+    c.font = "400 11px Lato, sans-serif";
+    for (let m = Math.ceil((von + abw) / 3600) * 3600 - abw; m < bis; m += 3600) {
+      const h = new Date((m + abw) * 1000).getUTCHours(); if (h % 2) continue;
+      const x = xVon(m); c.fillStyle = "#d8eaf2"; c.fillRect(x, ly + lh, 1, 3); text(String(h), x, ly + lh + 15, "#d8eaf2", c.font, "center");
+    }
+    if (jetzt > von && jetzt < bis) {
+      const x = xVon(jetzt), a = 0.6 + 0.4 * Math.sin(t * 0.006);
+      c.fillStyle = `rgba(255,214,120,${a})`; c.fillRect(x, ly - 2, 1, lh + 4);
+      c.beginPath(); c.moveTo(x - 4, ly - 9); c.lineTo(x + 4, ly - 9); c.lineTo(x, ly - 3); c.fill();
+    }
+    passend(note, ox + 8, 46, 120, nf, 20, true, "left");
+    passend(grund, ox + 8, 64, 195, "#d8eaf2", 12, false, "left");
+    passend(dunkel, ox + W - 8, 46, 170, "#fff", 14, false, "right");
+    passend(ohneMond, ox + W - 8, 64, 105, "#d8eaf2", 12, false, "right");
+    passend(L(`Sonne unter ${uhr(n.unter)} · auf ${uhr(n.auf)}`, `Sunset ${uhr(n.unter)} · sunrise ${uhr(n.auf)}`), ox + W / 2, 140, W - 12, "#d8eaf2", 12, false, "center");
+    const mA = n.mondAuf >= von && n.mondAuf <= bis, mU = n.mondUnter >= von && n.mondUnter <= bis, mitte = Math.max(0, Math.min(144, Math.floor(((von + bis) / 2 - n.mittag) / 600)));
+    const mondA = mA && mU && n.mondAuf < n.mondUnter ? L(`Mond auf ${uhr(n.mondAuf)} · unter ${uhr(n.mondUnter)}`, `Moonrise ${uhr(n.mondAuf)} · set ${uhr(n.mondUnter)}`)
+      : mA && mU ? L(`Mond unter ${uhr(n.mondUnter)} · auf ${uhr(n.mondAuf)}`, `Moonset ${uhr(n.mondUnter)} · rise ${uhr(n.mondAuf)}`)
+      : mA ? L(`Mond geht um ${uhr(n.mondAuf)} auf`, `Moonrise ${uhr(n.mondAuf)}`) : mU ? L(`Mond geht um ${uhr(n.mondUnter)} unter`, `Moonset ${uhr(n.mondUnter)}`)
+      : n.mond[mitte] > 0 ? L("Mond die ganze Nacht", "Moon up all night") : L("kein Mond in der Nacht", "no moon tonight");
+    passend(`${mondA} · ${L(`${Math.round(n.mondLicht * 100)} % beleuchtet`, `${Math.round(n.mondLicht * 100)} % lit`)}`, ox + W / 2, 156, W - 12, "#ffecaa", 12, false, "center");
   }
   // Mondphase: 0 Neumond, 0.5 Vollmond (wie mondphase() in bilder.cpp)
   const phase = () => (((Date.now() / 1000 - 947182440) / 86400 / 29.530588853) % 1 + 1) % 1;
@@ -80,8 +191,8 @@
   }
   function seiteDemnaechst(ox, t) {
     text(L("Demnächst", "Coming soon"), ox + 8, 18, "#fff", "700 15px Lato, sans-serif");
-    const liste = L(["Heute Nacht: Dunkelheit & Wolken", "Planeten am Himmel", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts"],
-                    ["Tonight: darkness & clouds", "Planets in the sky", "ISS & satellites", "Aurora alert", "Rocket launches"]);
+    const liste = L(["Seeing & Durchsicht", "Planeten am Himmel", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts"],
+                    ["Seeing & transparency", "Planets in the sky", "ISS & satellites", "Aurora alert", "Rocket launches"]);
     liste.forEach((s, i) => {
       const y = 48 + i * 24, x = ox + 30, an = 0.55 + 0.45 * Math.sin(t * 0.004 + i * 1.3);
       c.strokeStyle = c.fillStyle = `rgba(255,214,120,${an})`; c.lineWidth = 1;
@@ -90,7 +201,7 @@
       passend(s, x + 14, y, W - 50, "#fff", 13, false, "left");
     });
   }
-  const SEITEN = [seiteMond, seiteDemnaechst];
+  const SEITEN = [seiteNacht, seiteMond, seiteDemnaechst];
   function statusLeiste() {
     const z = new Date(), uhr = String(z.getHours()).padStart(2, "0") + ":" + String(z.getMinutes()).padStart(2, "0");
     text(uhr, W - 37, 18, "#fff", "700 15px Lato, sans-serif", "right");

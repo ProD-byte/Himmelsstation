@@ -5,11 +5,11 @@
 
 #include <Arduino.h>
 
-const int SEITEN_ANZAHL = 2;  // Mond, Demnaechst (weitere Seiten kommen dazu)
+const int SEITEN_ANZAHL = 3;  // Heute Nacht, Mond, Demnaechst (weitere Seiten kommen dazu)
 
 struct Einstellungen {
   uint8_t licht = 0;          // Helligkeitsstufe am Tag (0 = hellste)
-  uint8_t seiten = 0xFF;      // welche Seiten gezeigt werden (Bit 0 = Mond ...)
+  uint8_t seiten = 0xFF;      // welche Seiten gezeigt werden (Bit 0 = Heute Nacht ...)
   uint8_t wechsel = 12;       // Sekunden bis zur naechsten Seite, 0 = nur per Taste
   bool nacht = true;          // Nachtmodus: Display abends dunkler
   uint8_t nachtVon = 22;      // Uhrzeit (volle Stunde)

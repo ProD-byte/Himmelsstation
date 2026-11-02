@@ -4,16 +4,24 @@
 // dazu die Suche nach Updates. Mond, Planeten, Satelliten und Weltraumwetter kommen nach und nach dazu.
 
 #include <Arduino.h>
+#include "astro.h"
 
 struct Himmel {
   bool gueltig = false;
   char ort[40] = "";               // Ortsname fuer die Anzeige
   bool tag = true;                 // Sonne ueber dem Horizont
-  int wolken = 0;                  // Bewoelkung jetzt in %
+  int wolkenJetzt = 0;             // Bewoelkung jetzt in %
   char sonneAuf[6] = "--:--", sonneUnter[6] = "--:--";
   int32_t utcAbweichung = 3600;    // Zeitzone des Orts in Sekunden (inkl. Sommerzeit)
   time_t stand = 0;                // Uhrzeit (Unix) des letzten erfolgreichen Abrufs
+  // Bewoelkung je Stunde (%), ab gestern 0 Uhr fuer 3 Tage; -1 = unbekannt
+  int8_t wolken[72];
+  time_t wolkenAb = 0;
+  Nacht nacht;                     // Daemmerung, Mond, Dunkelheit (selbst gerechnet, alle 10 min neu)
 };
+
+// Mittlere Bewoelkung zwischen von und bis (%), -1 = keine Daten
+int wolkenZwischen(const Himmel &h, time_t von, time_t bis);
 
 enum HimmelStatus { VERBINDE, ORTUNG, LADE, FERTIG, FEHLER };
 // Warum der letzte Abruf gescheitert ist (fuer den Hinweis auf dem Display)

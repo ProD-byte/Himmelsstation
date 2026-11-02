@@ -11,6 +11,7 @@ Das Geschwister-Projekt zur [Wetterstation](https://github.com/ProD-byte/Wetters
 
 | | |
 |---|---|
+| 🌌 **Heute Nacht** | wann es richtig dunkel wird (astronomische Dämmerung), Zeitleiste mit Dämmerungsstufen, Mond am Himmel und Wolken je Stunde, dazu eine Note fürs Beobachten. Sonne und Mond rechnet das Gerät selbst (gegen skyfield geprüft: Sonne auf Sekunden, Mond auf ca. 3 min) |
 | 🌙 **Mond** | Mondphase als Bild, beleuchteter Teil, nächster Voll- und Neumond. Das Gerät rechnet das selbst aus dem Datum aus |
 | ✨ **Nachthimmel** | funkelnde Sterne als Hintergrund, Morgen- und Abendrot um Sonnenauf- und -untergang |
 | 📶 **WLAN** | Einrichtung per Handy (WLAN „Himmelsstation-Setup“), merkt sich bis zu 5 Netze |
@@ -21,7 +22,7 @@ Das Geschwister-Projekt zur [Wetterstation](https://github.com/ProD-byte/Wetters
 
 ## Was als Nächstes kommt (Version 1)
 
-Heute Nacht (Dunkelheit, Wolken, Seeing) · Planeten · ISS & Satelliten · Weltraumwetter mit Polarlicht-Alarm · Raketenstarts
+Seeing & Durchsicht · Planeten · ISS & Satelliten · Weltraumwetter mit Polarlicht-Alarm · Raketenstarts
 
 ## Tasten
 
@@ -37,7 +38,8 @@ PlatformIO (VS Code), Umgebung `tdisplay_s3` (USB) oder `tdisplay_s3_wlan` (übe
 | Datei | Inhalt |
 |---|---|
 | `src/main.cpp` | Seiten, Tasten, Startbild, Update über WLAN |
-| `src/himmel.cpp` | Hintergrund-Aufgabe: Ort, Zeitzone, Sonne, Wolken, Updates; Mond-Rechnungen |
+| `src/himmel.cpp` | Hintergrund-Aufgabe: Ort, Zeitzone, Wolken je Stunde, Updates; Mond-Rechnungen |
+| `src/astro.cpp` | Sonne und Mond selbst gerechnet: Höhe, Auf-/Untergang, Dämmerung, Nacht |
 | `src/bilder.cpp` | Himmel, Mondphase, Text mit Umlauten |
 | `src/wlan.cpp`, `src/portal_html.h` | WLAN mit Einrichtung per Handy (inkl. Ortswahl) |
 | `src/web.cpp`, `src/web_html.h` | Einstellungsseite |

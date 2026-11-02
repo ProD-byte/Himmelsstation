@@ -2,7 +2,7 @@
 // Standort: am Handy gewaehlt (Einrichtung), sonst grob ueber die Internet-Adresse, sonst Cottbus
 //   Taster GPIO 0:  kurz = naechste Seite, 2 s halten = Sprache Deutsch/Englisch (zeigt auch Adresse + Build)
 //   Taster GPIO 14: kurz = Helligkeit, 3 s halten = WLAN und Ort neu einrichten
-// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Mond, Demnaechst - weitere folgen
+// Live-Infos vom Himmel und aus dem All (Konzept: KONZEPT.md). Seiten: Heute Nacht, Mond, Demnaechst - weitere folgen
 // Zeitzone, Sonne und Wolken: open-meteo.com
 // WLAN: Einrichtung per Handy ueber das WLAN "Himmelsstation-Setup" (siehe wlan.cpp)
 // Einstellungen: http://himmelsstation.local (siehe web.cpp)
@@ -149,7 +149,156 @@ void passend(const char *txt, int x, int y, int platz, uint16_t f, Schrift s, Au
 }
 
 // ------------------------------------------------------------
-// Seite 1: Mond (rechnet das Geraet selbst aus dem Datum)
+// Seite 1: Heute Nacht - wann es dunkel wird, Mond, Wolken und eine Note fuers Beobachten
+// ------------------------------------------------------------
+// Uhrzeit als "18:27" (Ortszeit), "--:--" wenn es das Ereignis nicht gibt
+static void uhrzeit(char *z, size_t n, time_t t) {
+  if (!t) {
+    strlcpy(z, "--:--", n);
+    return;
+  }
+  struct tm a;
+  localtime_r(&t, &a);
+  snprintf(z, n, "%02d:%02d", a.tm_hour, a.tm_min);
+}
+
+// Farbe des Himmels je nach Sonnenhoehe: Tag, buergerliche, nautische, astronomische Daemmerung, Nacht
+static uint16_t daemmerFarbe(float s) {
+  if (s >= -0.833f) return farbe(96, 150, 220);
+  if (s >= -6) return farbe(62, 98, 170);
+  if (s >= -12) return farbe(36, 58, 120);
+  if (s >= -18) return farbe(20, 30, 74);
+  return farbe(6, 8, 22);
+}
+
+void seiteNacht(int ox, uint32_t t) {
+  titel(ox, TX("Heute Nacht", "Tonight"), t);
+  const Nacht &n = himmel.nacht;
+  if (!n.gueltig) {
+    schrift(bild, S_M);
+    schreibe(bild, TX("Rechne ...", "Calculating ..."), ox + B / 2, H / 2, HELL, MITTE);
+    return;
+  }
+  const bool hk = hoch();
+  char z[48], a[8], b[8];
+
+  // Note: Wolken waehrend der Dunkelheit und wie sehr der Mond stoert
+  int wolken = wolkenZwischen(himmel, n.dunkelVon, n.dunkelBis);
+  float mondAnteil = n.dunkelMin ? 1 - (float)n.ohneMondMin / n.dunkelMin : 0;
+  float stoert = mondAnteil * n.mondLicht;
+  float wert = (wolken < 0 ? 1 : 1 - wolken / 100.0f) * (1 - 0.7f * stoert);
+  if (n.dunkelArt < 2) wert *= 0.5f;  // nie richtig dunkel (Hochsommer im Norden)
+  const char *note;
+  uint16_t noteFarbe;
+  if (wert >= 0.75f) note = TX("Sehr gut", "Very good"), noteFarbe = farbe(110, 230, 130);
+  else if (wert >= 0.5f) note = TX("Gut", "Good"), noteFarbe = farbe(190, 230, 110);
+  else if (wert >= 0.25f) note = TX("Mäßig", "Fair"), noteFarbe = farbe(255, 200, 80);
+  else note = TX("Schlecht", "Poor"), noteFarbe = farbe(255, 110, 100);
+  const char *grundW = wolken < 0 ? TX("ohne Wolkendaten", "no cloud data") : wolken < 20 ? TX("klar", "clear") : wolken < 50 ? TX("teils bewölkt", "partly cloudy")
+                       : wolken < 80 ? TX("meist bewölkt", "mostly cloudy") : TX("bedeckt", "overcast");
+  const char *grundM = !n.dunkelArt ? TX("nicht richtig dunkel", "never really dark")
+                       : stoert < 0.1f ? TX("kein Mondlicht", "no moonlight")
+                       : stoert < 0.45f ? TX("etwas Mondlicht", "some moonlight") : TX("viel Mondlicht", "bright moon");
+  char grund[48];
+  snprintf(grund, sizeof(grund), "%s · %s", grundW, grundM);
+
+  // Dunkelheit
+  char dunkel[40], ohneMond[40];
+  uhrzeit(a, sizeof(a), n.dunkelVon);
+  uhrzeit(b, sizeof(b), n.dunkelBis);
+  if (n.dunkelArt == 3) snprintf(dunkel, sizeof(dunkel), TX("dunkel %s – %s", "dark %s – %s"), a, b);
+  else if (n.dunkelArt == 2) snprintf(dunkel, sizeof(dunkel), TX("halbdunkel %s – %s", "twilight %s – %s"), a, b);
+  else strlcpy(dunkel, TX("keine echte Nacht", "no real night"), sizeof(dunkel));
+  snprintf(ohneMond, sizeof(ohneMond), TX("%d:%02d h mondfrei", "%d:%02d h moonless"), n.ohneMondMin / 60, n.ohneMondMin % 60);
+
+  // Zeitleiste: 1 h vor Sonnenuntergang bis 1 h nach Sonnenaufgang (sonst 16 bis 8 Uhr)
+  time_t von = n.unter ? n.unter - 3600 : n.mittag + 4 * 3600, bis = n.auf ? n.auf + 3600 : n.mittag + 20 * 3600;
+  if (bis <= von) bis = von + 16 * 3600;
+  const int lx = ox + 10, lb = B - 20, ly = hk ? 158 : 82, lh = hk ? 22 : 20;
+  auto xVon = [&](time_t z) { return lx + (int)((int64_t)(z - von) * lb / (bis - von)); };
+  for (int x = 0; x < lb; x++) {
+    time_t z = von + (int64_t)x * (bis - von) / lb;
+    float i = (z - n.mittag) / 600.0f;
+    int k = constrain((int)i, 0, NACHT_SCHRITTE - 2);
+    float f = constrain(i - k, 0.0f, 1.0f);
+    float sh = n.sonne[k] + (n.sonne[k + 1] - n.sonne[k]) * f, mh = n.mond[k] + (n.mond[k + 1] - n.mond[k]) * f;
+    uint16_t c = daemmerFarbe(sh);
+    // Wolken: grau darueberlegen, je dichter desto mehr
+    int w = himmel.wolkenAb ? (z - himmel.wolkenAb) / 3600 : -1;
+    if (w >= 0 && w < 72 && himmel.wolken[w] > 0) c = bild.alphaBlend(himmel.wolken[w] * 170 / 100, farbe(120, 126, 140), c);
+    bild.drawFastVLine(lx + x, ly, lh, c);
+    // Mond ueber dem Horizont: helles Band darueber, so hell wie er beleuchtet ist
+    if (mh > -0.833f) bild.drawFastHLine(lx + x, ly - 5, 1, bild.alphaBlend(80 + 175 * n.mondLicht, farbe(255, 236, 170), hintergrund(lx + x, ly - 5)));
+  }
+  bild.drawRoundRect(lx - 1, ly - 1, lb + 2, lh + 2, 3, bild.alphaBlend(120, WEISS, hintergrund(lx, ly - 8)));
+  // Stunden-Marken (gerade Stunden), quer jede 2., hochkant jede 4. beschriftet
+  schrift(bild, S_K);
+  struct tm vt;
+  localtime_r(&von, &vt);
+  time_t marke = von + (3600 - (vt.tm_min * 60 + vt.tm_sec)) % 3600;
+  for (; marke < bis; marke += 3600) {
+    struct tm m;
+    localtime_r(&marke, &m);
+    if (m.tm_hour % (hk ? 4 : 2)) continue;
+    int x = xVon(marke);
+    bild.drawFastVLine(x, ly + lh, 3, HELL);
+    snprintf(z, sizeof(z), "%d", m.tm_hour);
+    schreibe(bild, z, x, ly + lh + 15, HELL, MITTE);
+  }
+  // jetzt
+  time_t jetzt = time(nullptr);
+  if (jetzt > von && jetzt < bis) {
+    int x = xVon(jetzt);
+    float puls = 0.6f + 0.4f * sinf(t * 0.006f);
+    uint16_t f = bild.alphaBlend(255 * puls, farbe(255, 214, 120), hintergrund(x, ly - 10));
+    bild.drawFastVLine(x, ly - 2, lh + 4, f);
+    bild.fillTriangle(x - 4, ly - 9, x + 4, ly - 9, x, ly - 3, f);
+  }
+
+  // Zeiten von Sonne und Mond
+  char sonne[40], mond[64];
+  uhrzeit(a, sizeof(a), n.unter);
+  uhrzeit(b, sizeof(b), n.auf);
+  snprintf(sonne, sizeof(sonne), TX("Sonne unter %s · auf %s", "Sunset %s · sunrise %s"), a, b);
+  // Mond: nur was in der Nacht passiert (Auf-/Untergang am Nachmittag interessiert hier nicht)
+  bool mAuf = n.mondAuf >= von && n.mondAuf <= bis, mUnter = n.mondUnter >= von && n.mondUnter <= bis;
+  int mitte = constrain((int)(((von + bis) / 2 - n.mittag) / 600), 0, NACHT_SCHRITTE - 1);
+  char mondA[40], mondB[24];
+  uhrzeit(a, sizeof(a), n.mondAuf);
+  uhrzeit(b, sizeof(b), n.mondUnter);
+  if (mAuf && mUnter && n.mondAuf < n.mondUnter) snprintf(mondA, sizeof(mondA), TX("Mond auf %s · unter %s", "Moonrise %s · set %s"), a, b);
+  else if (mAuf && mUnter) snprintf(mondA, sizeof(mondA), TX("Mond unter %s · auf %s", "Moonset %s · rise %s"), b, a);
+  else if (mAuf) snprintf(mondA, sizeof(mondA), TX("Mond geht um %s auf", "Moonrise %s"), a);
+  else if (mUnter) snprintf(mondA, sizeof(mondA), TX("Mond geht um %s unter", "Moonset %s"), b);
+  else strlcpy(mondA, n.mond[mitte] > 0 ? TX("Mond die ganze Nacht", "Moon up all night") : TX("kein Mond in der Nacht", "no moon tonight"), sizeof(mondA));
+  snprintf(mondB, sizeof(mondB), TX("%d %% beleuchtet", "%d %% lit"), (int)lroundf(n.mondLicht * 100));
+  snprintf(mond, sizeof(mond), "%s · %s", mondA, mondB);
+
+  if (hk) {
+    passend(note, ox + B / 2, 82, B - 12, noteFarbe, S_GF, MITTE);
+    passend(grund, ox + B / 2, 101, B - 12, HELL, S_K, MITTE);
+    passend(dunkel, ox + B / 2, 124, B - 12, WEISS, S_M, MITTE);
+    passend(ohneMond, ox + B / 2, 142, B - 12, HELL, S_K, MITTE);
+    uhrzeit(a, sizeof(a), n.unter);
+    uhrzeit(b, sizeof(b), n.auf);
+    snprintf(z, sizeof(z), TX("Sonne unter %s", "Sunset %s"), a);
+    passend(z, ox + B / 2, 222, B - 12, HELL, S_K, MITTE);
+    snprintf(z, sizeof(z), TX("Sonne auf %s", "Sunrise %s"), b);
+    passend(z, ox + B / 2, 240, B - 12, HELL, S_K, MITTE);
+    passend(mondA, ox + B / 2, 262, B - 12, farbe(255, 236, 170), S_K, MITTE);
+    passend(mondB, ox + B / 2, 280, B - 12, farbe(255, 236, 170), S_K, MITTE);
+  } else {
+    passend(note, ox + 8, 46, 120, noteFarbe, S_GF, LINKS);
+    passend(grund, ox + 8, 64, 195, HELL, S_K, LINKS);
+    passend(dunkel, ox + B - 8, 46, 170, WEISS, S_M, RECHTS);
+    passend(ohneMond, ox + B - 8, 64, 105, HELL, S_K, RECHTS);
+    passend(sonne, ox + B / 2, 140, B - 12, HELL, S_K, MITTE);
+    passend(mond, ox + B / 2, 156, B - 12, farbe(255, 236, 170), S_K, MITTE);
+  }
+}
+
+// ------------------------------------------------------------
+// Seite 2: Mond (rechnet das Geraet selbst aus dem Datum)
 // ------------------------------------------------------------
 void seiteMond(int ox, uint32_t t) {
   titel(ox, TX("Mond", "Moon"), t);
@@ -181,12 +330,12 @@ void seiteMond(int ox, uint32_t t) {
 }
 
 // ------------------------------------------------------------
-// Seite 2: Demnaechst - was die Himmelsstation bald kann
+// Seite 3: Demnaechst - was die Himmelsstation bald kann
 // ------------------------------------------------------------
 void seiteDemnaechst(int ox, uint32_t t) {
   titel(ox, TX("Demnächst", "Coming soon"), t);
-  static const char *DE[] = {"Heute Nacht: Dunkelheit & Wolken", "Planeten am Himmel", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts"};
-  static const char *EN[] = {"Tonight: darkness & clouds", "Planets in the sky", "ISS & satellites", "Aurora alert", "Rocket launches"};
+  static const char *DE[] = {"Seeing & Durchsicht", "Planeten am Himmel", "ISS & Satelliten", "Polarlicht-Alarm", "Raketenstarts"};
+  static const char *EN[] = {"Seeing & transparency", "Planets in the sky", "ISS & satellites", "Aurora alert", "Rocket launches"};
   const bool hk = hoch();
   const int y0 = hk ? HOCH_TOP + 30 : 48, dy = hk ? 40 : 24, x = ox + (hk ? 26 : 30);
   for (int i = 0; i < 5; i++) {
@@ -204,8 +353,9 @@ void seiteDemnaechst(int ox, uint32_t t) {
 void zeichneSeite(int s, int ox, uint32_t t) {
   if (ox <= -B || ox >= B) return;
   switch (s) {
-    case 0: seiteMond(ox, t); break;
-    case 1: seiteDemnaechst(ox, t); break;
+    case 0: seiteNacht(ox, t); break;
+    case 1: seiteMond(ox, t); break;
+    case 2: seiteDemnaechst(ox, t); break;
   }
 }
 
