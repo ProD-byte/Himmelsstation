@@ -26,3 +26,4 @@ struct Starts {
 
 void startsAktualisieren();  // aus der Hintergrund-Aufgabe
 bool startsHolen(Starts &s);
+bool startsVersucht();       // schon mindestens einmal versucht (fuer "nicht erreichbar" statt "hole ...")

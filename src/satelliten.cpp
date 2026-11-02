@@ -3,6 +3,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Sgp4.h>
+#include <Preferences.h>
 
 static const struct {
   const char *name;
@@ -17,7 +18,7 @@ static int anzahl = 0;
 static Sgp4 sgp;
 static char tle[SATELLITEN][2][72];
 static bool tleDa[SATELLITEN];
-static uint32_t tleZeit = 0, tleVersuch = 0;
+static uint32_t tleVersuch = 0;
 static time_t gerechnetBis = 0;
 static float ortLat = NAN, ortLon = NAN;
 
@@ -47,6 +48,28 @@ static bool tleHolen(int i) {
   strlcpy(tle[i][0], z1.c_str(), sizeof(tle[i][0]));
   strlcpy(tle[i][1], z2.c_str(), sizeof(tle[i][1]));
   return true;
+}
+
+// Bahndaten im Flash merken (einmal am Tag geschrieben): nach einem Neustart sind sie sofort da, auch wenn
+// CelesTrak gerade nicht antwortet oder uns wegen zu vieler Abfragen sperrt. Bis 5 Tage alt sind sie gut genug.
+static void tleSpeichern() {
+  Preferences p;
+  p.begin("tle", false);
+  p.putBytes("daten", tle, sizeof(tle));
+  p.putULong("zeit", (uint32_t)time(nullptr));
+  p.end();
+}
+
+static void tleLaden() {
+  Preferences p;
+  p.begin("tle", true);
+  uint32_t zeit = p.getULong("zeit", 0);
+  if (zeit && time(nullptr) - (time_t)zeit < 5 * 86400 && p.getBytes("daten", tle, sizeof(tle)) == sizeof(tle))
+    for (int i = 0; i < SATELLITEN; i++) tleDa[i] = tle[i][0][0] == '1';
+  p.end();
+  // gespeicherte Daten gelten als "heute geholt", wenn sie juenger als ein Tag sind - sonst gleich neu fragen
+  if (zeit && time(nullptr) - (time_t)zeit < 86400) tleVersuch = millis() - (uint32_t)(time(nullptr) - zeit) * 1000;
+  Serial.printf("Bahndaten aus dem Flash: %s\n", tleDa[0] ? "ja" : "nein");
 }
 
 static void satStarten(int i) {
@@ -96,7 +119,9 @@ static void berechnen(time_t ab) {
   for (int s = 0; s < SATELLITEN; s++) {
     if (!tleDa[s]) continue;
     satStarten(s);
-    sgp.initpredpoint((unsigned long)(ab - 20 * 60), 0.0);  // etwas frueher, damit ein laufender gefunden wird
+    // 3 h frueher anfangen: die Suche springt zuerst eine ganze Erdumrundung (ca. 92 min) weiter - sonst
+    // wuerde ein gerade laufender Ueberflug uebersprungen (vorbeigegangene werden unten aussortiert)
+    sgp.initpredpoint((unsigned long)(ab - 3 * 3600), 0.0);
     passinfo p;
     for (int k = 0; k < 40 && sgp.nextpass(&p, 20); k++) {
       Ueberflug u;
@@ -132,19 +157,21 @@ static void berechnen(time_t ab) {
 void satellitenAktualisieren(float lat, float lon) {
   time_t jetzt = time(nullptr);
   if (jetzt < 1700000000) return;  // Uhr noch nicht gestellt
+  static bool geladen = false;
+  if (!geladen) geladen = true, tleLaden();
   bool neuerOrt = lat != ortLat || lon != ortLon;
   ortLat = lat, ortLon = lon;
-  // Bahndaten taeglich erneuern; klappt es nicht, reichen die alten noch ein paar Tage
+  // Bahndaten taeglich erneuern; fehlt einer, stuendlich nur diesen nachholen (CelesTrak sperrt, wer zu oft fragt).
+  // Klappt es nicht, reichen die alten noch ein paar Tage.
   uint32_t ms = millis();
   bool alle = true;
   for (bool d : tleDa) alle &= d;
-  bool veraltet = !alle || ms - tleZeit > TLE_ABSTAND;
-  if (veraltet && (!tleVersuch || ms - tleVersuch > (alle ? TLE_FEHLER : 5 * 60 * 1000UL))) {
+  if (!tleVersuch || ms - tleVersuch > (alle ? TLE_ABSTAND : TLE_FEHLER)) {
     tleVersuch = ms;
     bool neu = false;
     for (int i = 0; i < SATELLITEN; i++)
-      if (tleHolen(i)) tleDa[i] = neu = true;
-    if (neu) tleZeit = ms, gerechnetBis = 0;
+      if ((alle || !tleDa[i]) && tleHolen(i)) tleDa[i] = neu = true;
+    if (neu) gerechnetBis = 0, tleSpeichern();
   }
   bool irgendeiner = false;
   for (bool d : tleDa) irgendeiner |= d;

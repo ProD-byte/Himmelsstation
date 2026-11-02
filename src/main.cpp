@@ -266,14 +266,14 @@ void seiteNacht(int ox, uint32_t t) {
   snprintf(sonne, sizeof(sonne), TX("Sonne unter %s · auf %s", "Sunset %s · sunrise %s"), a, b);
   // Mond: nur was in der Nacht passiert (Auf-/Untergang am Nachmittag interessiert hier nicht)
   bool mAuf = n.mondAuf >= von && n.mondAuf <= bis, mUnter = n.mondUnter >= von && n.mondUnter <= bis;
-  int mitte = constrain((int)(((von + bis) / 2 - n.mittag) / 600), 0, NACHT_SCHRITTE - 1);
+  int mitte = constrain((int)((von + (bis - von) / 2 - n.mittag) / 600), 0, NACHT_SCHRITTE - 1);
   char mondA[40], mondB[24];
   uhrzeit(a, sizeof(a), n.mondAuf);
   uhrzeit(b, sizeof(b), n.mondUnter);
   if (mAuf && mUnter && n.mondAuf < n.mondUnter) snprintf(mondA, sizeof(mondA), TX("Mond auf %s · unter %s", "Moonrise %s · set %s"), a, b);
   else if (mAuf && mUnter) snprintf(mondA, sizeof(mondA), TX("Mond unter %s · auf %s", "Moonset %s · rise %s"), b, a);
-  else if (mAuf) snprintf(mondA, sizeof(mondA), TX("Mond geht um %s auf", "Moonrise %s"), a);
-  else if (mUnter) snprintf(mondA, sizeof(mondA), TX("Mond geht um %s unter", "Moonset %s"), b);
+  else if (mAuf) snprintf(mondA, sizeof(mondA), hk ? TX("Mond auf %s", "Moonrise %s") : TX("Mond geht um %s auf", "Moonrise %s"), a);
+  else if (mUnter) snprintf(mondA, sizeof(mondA), hk ? TX("Mond unter %s", "Moonset %s") : TX("Mond geht um %s unter", "Moonset %s"), b);
   else strlcpy(mondA, n.mond[mitte] > 0 ? TX("Mond die ganze Nacht", "Moon up all night") : TX("kein Mond in der Nacht", "no moon tonight"), sizeof(mondA));
   snprintf(mondB, sizeof(mondB), TX("%d %% beleuchtet", "%d %% lit"), (int)lroundf(n.mondLicht * 100));
   snprintf(mond, sizeof(mond), "%s · %s", mondA, mondB);
@@ -321,7 +321,7 @@ void seitePlaneten(int ox, uint32_t t) {
   const Nacht &n = himmel.nacht;
   const bool hk = hoch();
   // Himmel von Sueden gesehen: links Osten, rechts Westen (Azimut 45 bis 315 Grad), Hoehe mit Wurzel
-  const int hor = hk ? 190 : 96, hoehe = hk ? 112 : 62, cx = ox + B / 2, halb = hk ? 74 : 148;
+  const int hor = hk ? 190 : 96, hoehe = hk ? 112 : 62, cx = ox + B / 2, halb = hk ? 70 : 140;
   auto px = [&](float az) { return cx + (int)(constrain(az - 180, -135.0f, 135.0f) / 135 * halb); };
   auto py = [&](float h) { return hor - (int)(sqrtf(constrain(h, 0.0f, 90.0f) / 90) * hoehe); };
   bild.drawFastHLine(cx - halb - 4, hor, 2 * halb + 8, bild.alphaBlend(130, farbe(170, 180, 205), hintergrund(cx, hor)));
@@ -773,7 +773,9 @@ void seiteStarts(int ox, uint32_t t) {
   titel(ox, TX("Raketenstarts", "Rocket launches"), t);
   int h = startsDa ? hauptStart() : -1;
   if (h < 0) {
-    passend(startsDa ? TX("Kein Start angekündigt", "No launch scheduled") : TX("Hole Startliste ...", "Loading launches ..."),
+    passend(startsDa ? TX("Kein Start angekündigt", "No launch scheduled")
+            : startsVersucht() ? TX("Startliste gerade nicht erreichbar", "Launch list unreachable right now")
+                               : TX("Hole Startliste ...", "Loading launches ..."),
             ox + B / 2, H / 2, B - 12, HELL, S_M, MITTE);
     return;
   }

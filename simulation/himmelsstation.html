@@ -207,7 +207,7 @@
     const jetzt = Date.now() / 1000;
     if (!nacht || jetzt - nachtZeit > 600) { nacht = nachtRechnen(jetzt); nachtZeit = jetzt; }
     if (!nacht.planet) nacht.planet = planetenNacht(nacht);
-    const hor = 96, hoehe = 62, cx = ox + W / 2, halb = 148;
+    const hor = 96, hoehe = 62, cx = ox + W / 2, halb = 140;
     const px = az => cx + Math.max(-135, Math.min(135, az - 180)) / 135 * halb, py = h => hor - Math.sqrt(Math.max(0, Math.min(90, h)) / 90) * hoehe;
     c.fillStyle = "rgba(170,180,205,.5)"; c.fillRect(cx - halb - 4, hor, 2 * halb + 8, 1);
     c.font = "400 11px Lato, sans-serif";

@@ -100,15 +100,16 @@ void planetOrt(int i, time_t t, double lat, double lon, float &az, float &h, flo
 }
 
 // Wann geht f zwischen t0 und t0 + schritt durch 'schwelle'? (halbieren bis auf ein paar Sekunden)
+// Achtung: time_t hat hier nur 32 Bit - (lo + hi) / 2 wuerde ueberlaufen, deshalb lo + (hi - lo) / 2
 static time_t genau(double (*f)(time_t, double, double), double schwelle, time_t t0, int schritt, double lat, double lon) {
   time_t lo = t0, hi = t0 + schritt;
   bool unten = f(lo, lat, lon) < schwelle;
   while (hi - lo > 5) {
-    time_t m = (lo + hi) / 2;
+    time_t m = lo + (hi - lo) / 2;
     if ((f(m, lat, lon) < schwelle) == unten) lo = m;
     else hi = m;
   }
-  return (lo + hi) / 2;
+  return lo + (hi - lo) / 2;
 }
 
 void nachtBerechnen(Nacht &n, time_t jetzt, int32_t abw, double lat, double lon) {

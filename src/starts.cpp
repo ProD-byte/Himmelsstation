@@ -7,6 +7,7 @@
 static SemaphoreHandle_t sperre = xSemaphoreCreateMutex();
 static Starts aktuell;
 static uint32_t naechster = 0;
+static volatile bool versucht = false;
 
 // "2026-11-04T01:28:00Z" -> Unix-Zeit
 static time_t utc(const char *s) {
@@ -83,6 +84,7 @@ void startsAktualisieren() {
   if (time(nullptr) < 1700000000 || (int32_t)(millis() - naechster) < 0) return;
   static Starts neu;  // nicht auf den Stapel
   bool ok = abrufen(neu);
+  versucht = true;
   if (ok) {
     xSemaphoreTake(sperre, portMAX_DELAY);
     aktuell = neu;
@@ -94,8 +96,11 @@ void startsAktualisieren() {
     long d = neu.s[i].net - time(nullptr);
     if (d > -1800 && d < 3600) bald = true;
   }
-  naechster = millis() + (bald ? 10 : 30) * 60 * 1000UL;
+  // nach einem Fehler in 10 min nochmal (nicht oefter - Launch Library zaehlt jede Abfrage)
+  naechster = millis() + (bald || !ok ? 10 : 30) * 60 * 1000UL;
 }
+
+bool startsVersucht() { return versucht; }
 
 bool startsHolen(Starts &s) {
   xSemaphoreTake(sperre, portMAX_DELAY);
